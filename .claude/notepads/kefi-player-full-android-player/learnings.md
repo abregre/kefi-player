@@ -50,7 +50,35 @@
 - System image download+install (`system-images;android-36;google_apis;x86_64`, 4.3G on disk) took ~59 seconds total (fast link).
 - Booted device `ro.build.version.sdk` = `36` (no fallback to API 35 was needed).
 
+## T4 — App.kt application-scoped singleton (2026-08-19)
+- Package `com.kefi.player`. Access syntax later tasks (T5/T6/T7) must use verbatim:
+  `com.kefi.player.App.instance` (or bare `App.instance` from within the `com.kefi.player`
+  package) for the singleton `Application` instance, and `App.scope` (a companion-object
+  `val`, `CoroutineScope(SupervisorJob() + Dispatchers.IO)`) for the application-scoped
+  coroutine scope. Both are on `App`'s `companion object`; `instance` has a private setter
+  assigned once in `onCreate()`.
+- Did NOT copy ytmp3's `ensureNativeToolsReady()`/`Mutex`/`isReady`/YoutubeDL/FFmpeg — none
+  of that is relevant here; T6 will add its own mutex-guarded init for the MediaController.
+- Manifest: added only `android:name=".App"` to the existing `<application>` tag in
+  `android/app/src/main/AndroidManifest.xml`. Nothing else in the manifest touched.
+- Verified: `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` = `0` (first `.kt` file
+  in the project compiled cleanly, no Kotlin toolchain issues surfaced).
+  `npm run apk 2>&1 | grep -c "BUILD SUCCESSFUL"` = `1` (APK 8.2M).
+  Installed on `emulator-5554` (Success), launched `com.kefi.player/.MainActivity`, and
+  `adb -s emulator-5554 logcat -d | grep -c "KefiApp onCreate"` = `1` — the `Log.i("KefiApp",
+  "KefiApp onCreate")` line fired, confirming `.App` is actually wired into the manifest and
+  running (not dead code).
+
 ## T3 — Media3 dependencies only (2026-08-19)
 - APK size before edit: 4,424,819 bytes. APK size after adding media3-exoplayer + media3-session 1.11.0: 8,541,817 bytes. Delta: +4,116,998 bytes (~3.93MB), within the required 4,600,000–8,800,000 byte absolute range from the task's Expected Outcome.
 - `unzip -l app-debug.apk | grep -c 'lib/'` = 0 — confirmed Media3 pulled in no native libraries.
 - `npm run apk 2>&1 | grep -c "BUILD SUCCESSFUL"` = 1.
+
+## T2 — deterministic audio fixtures + MediaStore indexing (2026-08-19)
+- Codec used: `libmp3lame` (available on this machine) — all fixtures are `.mp3`, no AAC/`.m4a` fallback needed.
+- Scan method that worked (first in the ladder, stop there): `adb -s emulator-5554 shell content call --uri content://media --method scan_file --arg /sdcard/Music/kefi-qa/<file>.mp3`, run once per file. `scan_volume` and `jobscheduler run -f com.android.providers.media.module -201` were never reached.
+- Observed durations (ms): Άσπρη Μέρα=5042, Zeibekiko=7027, Ωδή=9038 (all within 500ms of nominal).
+- `content query --projection` gotcha: comma-separated column list (`title,artist,album,duration`, as written in the plan) throws `IllegalArgumentException: Invalid column ...` on this API 36 `content` CLI. Must use **colons**: `--projection title:artist:album:duration` (matches `adb shell content query --help`). Use colon form in all later tasks that shell out to `content query`.
+- Greek ID3 tags round-trip cleanly end to end (ffmpeg encode → ID3v2.3 → MediaStore `content query`) with no mojibake — verified both via `ffprobe -show_entries format_tags=...` and on-device `content query`.
+- `scripts/qa-fixtures.sh <serial>` (default `emulator-5554`) is idempotent: verified by running it twice back-to-back — both runs report the same 3 rows, no duplicates, no schema drift.
+- Found and fixed a real bug during testing: `if ffmpeg -encoders 2>/dev/null | grep -q libmp3lame; then` is unsafe under `set -euo pipefail` — `grep -q` closing the pipe early on match SIGPIPEs ffmpeg, and pipefail then reports the pipeline's exit status as ffmpeg's non-zero SIGPIPE code (141) instead of grep's 0, flipping the branch to the fallback even though the encoder is present. Fix: capture ffmpeg's output into a variable first (`FFMPEG_ENCODERS="$(ffmpeg ... 2>/dev/null)"`), then `grep -q ... <<<"$FFMPEG_ENCODERS"`. Applies to any `set -euo pipefail` script piping a full/slow producer into `grep -q`.
