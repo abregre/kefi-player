@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -18,9 +19,10 @@ import org.json.JSONObject
 
 /**
  * Capacitor bridge between the WebView and [PlayerController]/[TrackSource]. T7 wired up
- * live state + transport (playTrack/pause/resume/seek). This task (T9) adds device-wide
- * audio listing and artwork lookup, gated behind the `audio` (API 33+) / `audioLegacy`
- * (API < 33) permission aliases. Queueing, shuffle/repeat belong to T10.
+ * live state + transport (playTrack/pause/resume/seek). T9 added device-wide audio listing
+ * and artwork lookup, gated behind the `audio` (API 33+) / `audioLegacy` (API < 33)
+ * permission aliases. T10 adds queueing, next/previous, shuffle, and repeat, and fixes the
+ * `seek` argument-coercion bug T9 found but deliberately left out of its own scope.
  */
 @CapacitorPlugin(
     name = "Player",
@@ -113,7 +115,11 @@ class PlayerPlugin : Plugin() {
 
     @PluginMethod
     fun seek(call: PluginCall) {
-        val positionMs = call.getLong("positionMs")
+        // Same PluginCall.getLong/org.json.Integer-boxing bug T9 found for trackId (see
+        // getArtwork below): every realistic positionMs fits in an Int, so org.json boxes it
+        // as Integer and a bare getLong("positionMs") silently returns null, rejecting every
+        // real call. Same fallback fix.
+        val positionMs = call.getLong("positionMs") ?: call.getInt("positionMs")?.toLong()
         if (positionMs == null) {
             call.reject("A positionMs is required")
             return
@@ -125,6 +131,97 @@ class PlayerPlugin : Plugin() {
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {
                 call.rejectWith("Could not seek: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun setQueue(call: PluginCall) {
+        val uris = call.getArray("uris")
+        if (uris == null || uris.length() == 0) {
+            call.reject("A non-empty uris array is required")
+            return
+        }
+        // startIndex is a small ordinal (queue position), never near Int.MAX_VALUE — getInt
+        // with a default is correct here, unlike positionMs/trackId above which are boxed
+        // ambiguously by org.json but still need Long on the Kotlin side.
+        val startIndex = call.getInt("startIndex", 0) ?: 0
+
+        App.scope.launch {
+            try {
+                val items = (0 until uris.length()).map { i ->
+                    val uri = uris.getString(i)
+                    // Mirrors playTrack's MediaItem construction above so mediaId stays
+                    // consistent (mediaId == uri) across both the single-track and queue paths.
+                    MediaItem.Builder()
+                        .setUri(uri)
+                        .setMediaId(uri)
+                        .build()
+                }
+                PlayerController.setQueue(items, startIndex)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not set queue: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun next(call: PluginCall) {
+        App.scope.launch {
+            try {
+                PlayerController.next()
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not skip to next: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun previous(call: PluginCall) {
+        App.scope.launch {
+            try {
+                PlayerController.previous()
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not skip to previous: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun setShuffle(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                PlayerController.setShuffle(enabled)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not set shuffle: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun setRepeatMode(call: PluginCall) {
+        val mode = call.getString("mode")
+        if (mode == null || repeatModeFromString(mode) == null) {
+            call.reject("A mode of off|one|all is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                PlayerController.setRepeatMode(repeatModeFromString(mode)!!)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not set repeat mode: ${t.message}", t)
             }
         }
     }
@@ -199,6 +296,25 @@ class PlayerPlugin : Plugin() {
         getPermissionState(audioPermissionAlias()) == PermissionState.GRANTED
 
     /**
+     * `PlayerController.Snapshot.repeatMode` is Media3's raw `Player.REPEAT_MODE_*` Int
+     * (T6). The JS-facing contract is the STRING `off|one|all` instead (T18's repeat toggle
+     * depends on this), so the mapping is applied only here, at the plugin boundary.
+     */
+    private fun repeatModeToString(mode: Int): String = when (mode) {
+        Player.REPEAT_MODE_ONE -> "one"
+        Player.REPEAT_MODE_ALL -> "all"
+        else -> "off"
+    }
+
+    /** Inverse of [repeatModeToString]; returns null for any string other than the 3 allowed. */
+    private fun repeatModeFromString(mode: String): Int? = when (mode) {
+        "off" -> Player.REPEAT_MODE_OFF
+        "one" -> Player.REPEAT_MODE_ONE
+        "all" -> Player.REPEAT_MODE_ALL
+        else -> null
+    }
+
+    /**
      * PluginCall.reject only accepts Exception, but coroutine failures (and
      * PlayerController's suspend functions) surface as Throwable.
      */
@@ -212,7 +328,8 @@ class PlayerPlugin : Plugin() {
      * both the `getPlayerState` resolve payload and the `playerState` push event, so pull
      * and push are interchangeable on the JS side. Nullable fields are written as explicit
      * JSON `null` (via `JSONObject.NULL`) rather than omitted, so every key is always
-     * present regardless of whether a track is loaded.
+     * present regardless of whether a track is loaded. `repeatMode` crosses the bridge as
+     * the string `off|one|all` (see [repeatModeToString]), not Media3's raw Int.
      */
     private fun PlayerController.Snapshot.toJSObject(): JSObject = JSObject().apply {
         put("mediaId", mediaId ?: JSONObject.NULL)
@@ -223,7 +340,7 @@ class PlayerPlugin : Plugin() {
         put("duration", duration)
         put("isPlaying", isPlaying)
         put("shuffleModeEnabled", shuffleModeEnabled)
-        put("repeatMode", repeatMode)
+        put("repeatMode", repeatModeToString(repeatMode))
         put("queueLength", queueLength)
         put("currentIndex", currentIndex)
     }

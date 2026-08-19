@@ -18,6 +18,14 @@ const player = usePlayer()
 // T2's f1.mp3 fixture ("Άσπρη Μέρα", MediaStore _id=24) — same fixture T7 used.
 const FIXTURE_URI = 'content://media/external/audio/media/24'
 
+// T10 QA: all 3 fixtures (Ωδή=23, Άσπρη Μέρα=24, Zeibekiko=25), in this order so
+// `startIndex: 0` lands on Άσπρη Μέρα per the plan's QA scenario.
+const QUEUE_URIS = [
+  'content://media/external/audio/media/24',
+  'content://media/external/audio/media/25',
+  'content://media/external/audio/media/23',
+]
+
 // T9 QA state: track listing, permission checks, artwork lookups.
 const permissionResult = ref(null)
 const tracksResult = ref(null)
@@ -84,6 +92,41 @@ async function getArtworkFor(trackId) {
     : null
   console.log('[T9 QA] getArtwork', trackId, JSON.stringify({ dataUrl: preview }))
 }
+
+// T10 QA helpers — usePlayer doesn't (and shouldn't) wrap queue/shuffle/repeat, so this dev
+// panel talks to the plugin directly for those, same precedent as the T9 helpers above.
+// Every result is also console.logged so `adb logcat` (Capacitor/Console) can observe it.
+async function queueFixtures() {
+  const result = await Player.setQueue({ uris: QUEUE_URIS, startIndex: 0 })
+  console.log('[T10 QA] setQueue', JSON.stringify(result))
+}
+
+async function nextTrack() {
+  const result = await Player.next()
+  console.log('[T10 QA] next', JSON.stringify(result))
+}
+
+async function previousTrack() {
+  const result = await Player.previous()
+  console.log('[T10 QA] previous', JSON.stringify(result))
+}
+
+async function toggleShuffle(enabled) {
+  const result = await Player.setShuffle({ enabled })
+  console.log('[T10 QA] setShuffle', JSON.stringify(result))
+}
+
+async function setRepeatMode(mode) {
+  const result = await Player.setRepeatMode({ mode })
+  console.log('[T10 QA] setRepeatMode', JSON.stringify(result))
+}
+
+// Real seek proof (T10 defect fix (a)): resolves instead of rejecting with
+// "A positionMs is required" now that PlayerPlugin.kt coerces Integer-boxed JSON numbers.
+async function seekTo(positionMs) {
+  await player.seek(positionMs)
+  console.log('[T10 QA] seek', positionMs, JSON.stringify({ currentPosition: player.currentPosition.value }))
+}
 </script>
 
 <template>
@@ -108,6 +151,23 @@ async function getArtworkFor(trackId) {
         <button type="button" @click="player.refreshState">Refresh state</button>
       </div>
       <pre class="dev-player-state">{{ JSON.stringify(snapshot) }}</pre>
+    </section>
+
+    <!-- TODO(T13): T10-only QA panel for queue/next/previous/shuffle/repeat/seek -->
+    <section class="dev-player">
+      <h2>Queue &amp; transport (dev, T10 QA)</h2>
+      <div class="dev-player-actions">
+        <button type="button" @click="queueFixtures">Queue all 3 (start Άσπρη Μέρα)</button>
+        <button type="button" @click="nextTrack">Next</button>
+        <button type="button" @click="previousTrack">Previous</button>
+        <button type="button" @click="toggleShuffle(true)">Shuffle on</button>
+        <button type="button" @click="toggleShuffle(false)">Shuffle off</button>
+        <button type="button" @click="setRepeatMode('off')">Repeat off</button>
+        <button type="button" @click="setRepeatMode('one')">Repeat one</button>
+        <button type="button" @click="setRepeatMode('all')">Repeat all</button>
+        <button type="button" @click="seekTo(0)">Seek 0</button>
+        <button type="button" @click="seekTo(60000)">Seek 60000</button>
+      </div>
     </section>
 
     <!-- TODO(T13): T9-only QA panel for listTracks/getArtwork/audio permissions -->

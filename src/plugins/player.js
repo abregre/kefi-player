@@ -10,7 +10,7 @@ import { registerPlugin } from '@capacitor/core'
  * @property {number} duration
  * @property {boolean} isPlaying
  * @property {boolean} shuffleModeEnabled
- * @property {number} repeatMode
+ * @property {'off' | 'one' | 'all'} repeatMode
  * @property {number} queueLength
  * @property {number} currentIndex
  */
@@ -42,6 +42,14 @@ import { registerPlugin } from '@capacitor/core'
  * @property {() => Promise<PlayerSnapshot>} pause
  * @property {() => Promise<PlayerSnapshot>} resume
  * @property {(options: { positionMs: number }) => Promise<PlayerSnapshot>} seek
+ * @property {(options: { uris: string[], startIndex?: number }) => Promise<PlayerSnapshot>} setQueue
+ *   Replaces the whole queue and starts playback at `startIndex` (default 0).
+ * @property {() => Promise<PlayerSnapshot>} next
+ * @property {() => Promise<PlayerSnapshot>} previous
+ *   Media3's `seekToPrevious()` semantics: restarts the current track if more than ~3s in,
+ *   otherwise moves to the previous queue item.
+ * @property {(options: { enabled: boolean }) => Promise<PlayerSnapshot>} setShuffle
+ * @property {(options: { mode: 'off' | 'one' | 'all' }) => Promise<PlayerSnapshot>} setRepeatMode
  * @property {() => Promise<{ tracks: PlayerTrack[] }>} listTracks
  *   Device-wide MediaStore query, on demand (no cache/database). Rejects with a message
  *   containing "permission" when the audio permission has not been granted.

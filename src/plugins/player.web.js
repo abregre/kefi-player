@@ -18,7 +18,7 @@ export class PlayerWeb extends WebPlugin {
     duration: 0,
     isPlaying: false,
     shuffleModeEnabled: false,
-    repeatMode: 0,
+    repeatMode: 'off',
     queueLength: 0,
     currentIndex: 0,
   }
@@ -26,11 +26,15 @@ export class PlayerWeb extends WebPlugin {
   /** @type {ReturnType<typeof setInterval> | null} */
   ticker = null
 
+  /** @type {string[]} Mock queue backing next()/previous(), mirrors setQueue's uris. */
+  queue = []
+
   async getPlayerState() {
     return { ...this.state }
   }
 
   async playTrack({ uri, title, artist }) {
+    this.queue = [uri]
     this.state = {
       ...this.state,
       mediaId: uri,
@@ -66,6 +70,58 @@ export class PlayerWeb extends WebPlugin {
     this.state = { ...this.state, currentPosition: positionMs }
     this.emitState()
     return { ...this.state }
+  }
+
+  async setQueue({ uris, startIndex = 0 }) {
+    this.queue = [...uris]
+    this.jumpToIndex(startIndex, { isPlaying: true })
+    this.emitState()
+    return { ...this.state }
+  }
+
+  async next() {
+    this.jumpToIndex(this.state.currentIndex + 1)
+    this.emitState()
+    return { ...this.state }
+  }
+
+  async previous() {
+    // Mirrors Media3's seekToPrevious(): restart the current track if more than ~3s in,
+    // otherwise move to the previous queue item (see PlayerController.kt notes, T10).
+    if (this.state.currentPosition > 3000) {
+      this.state = { ...this.state, currentPosition: 0 }
+    } else {
+      this.jumpToIndex(this.state.currentIndex - 1)
+    }
+    this.emitState()
+    return { ...this.state }
+  }
+
+  async setShuffle({ enabled }) {
+    this.state = { ...this.state, shuffleModeEnabled: enabled }
+    this.emitState()
+    return { ...this.state }
+  }
+
+  async setRepeatMode({ mode }) {
+    this.state = { ...this.state, repeatMode: mode }
+    this.emitState()
+    return { ...this.state }
+  }
+
+  jumpToIndex(index, extra = {}) {
+    if (this.queue.length === 0) return
+    const clamped = Math.max(0, Math.min(index, this.queue.length - 1))
+    const uri = this.queue[clamped]
+    this.state = {
+      ...this.state,
+      ...extra,
+      mediaId: uri,
+      uri,
+      currentPosition: 0,
+      currentIndex: clamped,
+      queueLength: this.queue.length,
+    }
   }
 
   startTicker() {
