@@ -4,8 +4,11 @@
 // WebView-side player state (via the <pre> below and the console.log, which
 // Capacitor forwards to `adb logcat`).
 import { Capacitor } from '@capacitor/core'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { usePlayer } from './composables/usePlayer'
+// TODO(T13): T9-only import — usePlayer doesn't (and shouldn't) wrap listTracks/getArtwork/
+// permission checks, so this dev panel talks to the plugin directly for those.
+import { Player } from './plugins/player'
 
 const platform = Capacitor.getPlatform()
 const isNative = Capacitor.isNativePlatform()
@@ -14,6 +17,11 @@ const player = usePlayer()
 
 // T2's f1.mp3 fixture ("Άσπρη Μέρα", MediaStore _id=24) — same fixture T7 used.
 const FIXTURE_URI = 'content://media/external/audio/media/24'
+
+// T9 QA state: track listing, permission checks, artwork lookups.
+const permissionResult = ref(null)
+const tracksResult = ref(null)
+const artworkResult = ref(null)
 
 const snapshot = computed(() => ({
   mediaId: player.mediaId.value,
@@ -47,6 +55,35 @@ function playFixture() {
     artist: 'Δήμητρα Παπαδοπούλου',
   })
 }
+
+// T9 QA helpers — logged so `adb logcat` can capture results even without reading the screen.
+async function checkAudioPermission() {
+  permissionResult.value = await Player.checkAudioPermission()
+  console.log('[T9 QA] checkAudioPermission', JSON.stringify(permissionResult.value))
+}
+
+async function requestAudioPermission() {
+  permissionResult.value = await Player.requestAudioPermission()
+  console.log('[T9 QA] requestAudioPermission', JSON.stringify(permissionResult.value))
+}
+
+async function listTracks() {
+  try {
+    tracksResult.value = await Player.listTracks()
+    console.log('[T9 QA] listTracks', JSON.stringify(tracksResult.value))
+  } catch (err) {
+    tracksResult.value = { error: err?.message ?? String(err) }
+    console.log('[T9 QA] listTracks error', tracksResult.value.error)
+  }
+}
+
+async function getArtworkFor(trackId) {
+  artworkResult.value = await Player.getArtwork({ trackId })
+  const preview = artworkResult.value.dataUrl
+    ? `${artworkResult.value.dataUrl.slice(0, 32)}... (${artworkResult.value.dataUrl.length} chars)`
+    : null
+  console.log('[T9 QA] getArtwork', trackId, JSON.stringify({ dataUrl: preview }))
+}
 </script>
 
 <template>
@@ -71,6 +108,21 @@ function playFixture() {
         <button type="button" @click="player.refreshState">Refresh state</button>
       </div>
       <pre class="dev-player-state">{{ JSON.stringify(snapshot) }}</pre>
+    </section>
+
+    <!-- TODO(T13): T9-only QA panel for listTracks/getArtwork/audio permissions -->
+    <section class="dev-player">
+      <h2>Tracks (dev, T9 QA)</h2>
+      <div class="dev-player-actions">
+        <button type="button" @click="checkAudioPermission">Check permission</button>
+        <button type="button" @click="requestAudioPermission">Request permission</button>
+        <button type="button" @click="listTracks">List tracks</button>
+        <button type="button" @click="getArtworkFor(24)">Artwork (Άσπρη Μέρα)</button>
+        <button type="button" @click="getArtworkFor(25)">Artwork (Zeibekiko)</button>
+      </div>
+      <pre class="dev-player-state">{{ JSON.stringify(permissionResult) }}</pre>
+      <pre class="dev-player-state">{{ JSON.stringify(tracksResult) }}</pre>
+      <pre class="dev-player-state">{{ JSON.stringify(artworkResult) }}</pre>
     </section>
   </main>
 </template>

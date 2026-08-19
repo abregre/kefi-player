@@ -521,3 +521,100 @@
   the coordinator for this exact purpose. `PlayerController.kt`, `PlayerPlugin.kt`, and every
   other Kotlin/Java file untouched. Still did not touch `scripts/`, `package.json`, any plan
   checkbox, or add any Gradle dependency.
+
+## Coordinator note for T17/T18 — position display must be interpolated locally
+Verified on device after T8: `playerState` events fire only on STATE CHANGES
+(isPlaying / mediaItem / playbackState / shuffle / repeat), not continuously. Observed the
+WebView showing `currentPosition: 9930` while the native side was at `32813` — correct by
+design, but it means any progress bar or seek bar bound directly to `currentPosition` will
+sit FROZEN between events.
+
+The plan forbids a polling loop (Must NOT Have: "No polling loop for playback position"),
+and that rule stands — do NOT call the native layer on a timer. Instead derive the displayed
+position LOCALLY in the composable/component:
+  displayed = lastKnownPosition + (isPlaying ? (now - lastUpdateTimestamp) * speed : 0)
+ticking with requestAnimationFrame (or a 250-500ms local timer) that performs NO bridge call,
+and re-basing whenever a real `playerState` event or a resume snapshot arrives. This gives a
+smooth bar with zero extra IPC.
+
+## T9 — TrackSource.kt, READ_MEDIA_AUDIO, listTracks, getArtwork (2026-08-20)
+- NEW `android/app/src/main/java/com/kefi/player/TrackSource.kt`: Kotlin `object`
+  (no instance state beyond the artwork cache), `data class Track`, and two `suspend fun`s
+  (`listTracks(context)`, `getArtwork(context, trackId)`), both doing their own
+  `withContext(Dispatchers.IO)` hop — callers never think about threading. On-demand
+  `MediaStore` query only: **no database, no cache table, no `ContentObserver`**, per the
+  plan's explicit Must NOT Have.
+- **Exact `Track` key names T15/T16 must build the library UI on** (verbatim, this is the
+  wire contract — `PlayerPlugin.Track.toJSObject()` serialises these 1:1 to JSON):
+  `id` (number, the raw `MediaStore._ID`, NOT the uri), `uri` (string,
+  `content://media/external/audio/media/<id>` built via `ContentUris.withAppendedId`),
+  `title` (string, always non-empty — falls back to `DISPLAY_NAME` if `TITLE` is null/blank,
+  then `""` as a last resort), `artist` (string|null), `album` (string|null), `albumArtist`
+  (string|null — null for all 3 fixtures, `ALBUM_ARTIST` was never tagged), `trackNumber`
+  (number|null), `year` (number|null — null for all 3 fixtures, `YEAR` was never tagged),
+  `durationMs` (number), `size` (number, bytes). `listTracks()` resolves `{ tracks: [...] }`
+  (an array under that key, not a bare array) — confirmed via real WebView logcat below.
+- **Permission aliases — exact strings, both declared on `@CapacitorPlugin`**: `audio`
+  (`Manifest.permission.READ_MEDIA_AUDIO`, API 33+) and `audioLegacy`
+  (`Manifest.permission.READ_EXTERNAL_STORAGE`, API < 33 — minSdk is 24 so this branch is
+  reachable, not defensive dead code). `PlayerPlugin.audioPermissionAlias()` picks between
+  them with `Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU`. Both permissions were
+  already in `AndroidManifest.xml` from T5 (`READ_EXTERNAL_STORAGE` has
+  `maxSdkVersion="32"`) — verified only, not re-added, diff on that file is empty for T9.
+  `checkAudioPermission()` / `requestAudioPermission()` both resolve `{ granted: boolean }`;
+  `requestAudioPermission()` short-circuits to `{ granted: true }` without prompting if
+  already granted, otherwise calls `requestPermissionForAlias(alias, call,
+  "audioPermissionCallback")`, whose `@PermissionCallback` re-reads `getPermissionState`
+  after the OS dialog closes. `listTracks` rejects BEFORE launching any coroutine (synchronous
+  `getPermissionState` check) with the literal message `"Audio permission is required to
+  list tracks"` when not granted — contains the substring `permission` as required.
+- **`getArtwork({ trackId })` returns `{ dataUrl }`**: `data:image/jpeg;base64,...` (256x256,
+  JPEG quality 85, `Base64.NO_WRAP`) on success, or `{ dataUrl: null }` — never a
+  `content://` uri, never omits the key. API 29+ (`Build.VERSION_CODES.Q`) uses
+  `ContentResolver.loadThumbnail(trackUri, Size(256,256), null)` directly on the **track's
+  own audio uri** (no need to resolve `ALBUM_ID`/album-art uri — `loadThumbnail` reads
+  embedded audio art natively on Q+); any thrown exception (no thumbnail available) is
+  caught and mapped to `null`. API 24-28 uses `MediaMetadataRetriever().apply {
+  setDataSource(context, trackUri) }`, `.embeddedPicture` (a raw byte array or null),
+  decoded via `BitmapFactory.decodeByteArray`, wrapped in `try/finally { retriever.release()
+  }` (this repo's minSdk 24 never actually exercises this branch on the emulator, which is
+  API 36, but it's mandatory dead-code-on-this-device per the plan). Memoised in a
+  `LinkedHashMap<Long, String?>(16, 0.75f, accessOrder = true)` with
+  `removeEldestEntry { size > 64 }` — a true LRU, `null` results are cached too (so a
+  known-artless track doesn't re-run `loadThumbnail`/`MediaMetadataRetriever` on every call).
+- **Real bug found and fixed via on-device QA, not by inspection**: Capacitor's
+  `PluginCall.getLong(name)` only returns non-null when the underlying JSON value was
+  already boxed as `java.lang.Long` — but `org.json`'s parser boxes small numbers (anything
+  that fits in `Int`, which covers every realistic MediaStore `_id` and, worse, likely every
+  `positionMs` T7's `seek()` will ever receive too) as `Integer`, not `Long`. A literal
+  `call.getLong("trackId")` therefore silently returned `null` for `trackId: 24` end-to-end
+  through the real bridge (confirmed via `Capacitor: callback: ..., methodData:
+  {"trackId":24}` immediately followed by `"error":{"message":"A trackId is required"}` in
+  logcat), even though the JS call sent a perfectly normal number. Fixed with
+  `call.getLong("trackId") ?: call.getInt("trackId")?.toLong()`. **T7's existing
+  `seek({ positionMs })` uses a bare `call.getLong("positionMs")` and was NOT touched by this
+  task (out of T9's scope) — it is very likely exposed to the exact same bug for any
+  `positionMs` under ~2.1 billion (i.e. always) and should get the same `getLong ?:
+  getInt()?.toLong()` fallback whenever T10/T11/T12 next touch `PlayerPlugin.kt`.**
+- **QA against `emulator-5554`, real WebView-originated calls** (temporary buttons added to
+  `src/App.vue`'s dev panel, marked `TODO(T13)`, importing `Player` directly since
+  `usePlayer.js` intentionally does not wrap these T9 methods):
+  1. `pm revoke ... READ_MEDIA_AUDIO` (this force-restarts/kills the app process on this
+     API 36 emulator — relaunch before tapping again), tapped "List tracks":
+     `Capacitor: Sending plugin error: {...,"methodName":"listTracks","success":false,
+     "error":{"message":"Audio permission is required to list tracks"}}`.
+  2. `pm grant ... READ_MEDIA_AUDIO`, tapped "List tracks": resolved
+     `{"tracks":[{"id":23,"title":"Ωδή",...,"durationMs":240039,...},{"id":24,"title":"Άσπρη
+     Μέρα",...,"durationMs":180036,...},{"id":25,"title":"Zeibekiko","artist":"Nikos
+     Alexiou","album":"Kefi Vol 1",...,"durationMs":210051,...}]}` — all 3 fixtures, all
+     non-empty titles, all `durationMs > 0`, Zeibekiko's `artist`/`album` exactly as
+     required.
+  3. Tapped "Artwork (Άσπρη Μέρα)" (`trackId: 24`): `{"dataUrl":"data:image/jpeg;base64,
+     /9j/4AAQS...` (1551 chars total). Tapped "Artwork (Zeibekiko)" (`trackId: 25`):
+     `{"dataUrl":null}`.
+- Verified: `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` = `0`. `npm run build`
+  succeeds (no new chunk — `player.web.js` untouched, no `.ts` file added). `npm run apk` →
+  `BUILD SUCCESSFUL`, APK still 8.7M (no new dependency).
+- Did NOT touch `PlaybackService.kt`, `PlayerController.kt`, `MainActivity.java`,
+  `src/composables/usePlayer.js`, `src/plugins/player.web.js`, or any plan checkbox. Did NOT
+  add SAF/`DocumentFile`, a database, or a `ContentObserver`.
