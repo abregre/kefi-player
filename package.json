@@ -15,7 +15,8 @@
     "dev:android": "npx cap run android --live-reload --external",
     "icons": "python3 scripts/make-icons.py",
     "fonts": "python3 scripts/fetch-fonts.py",
-    "keystore": "bash scripts/make-keystore.sh"
+    "keystore": "bash scripts/make-keystore.sh",
+    "fixtures": "bash scripts/qa-fixtures.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

@@ -207,7 +207,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
 
 ### Phase 0 — safety net and QA infrastructure
 
-- [ ] **T1: `git init`, first commit, and the QA emulator**
+- [x] **T1: `git init`, first commit, and the QA emulator**
   - Files: `/mnt/X/myProjects/kefi-player/.git/` (new), no source changes.
   - Steps:
     1. `git init && git add -A && git commit -m "Scaffold: Vue 3 + Vite (JS) + Capacitor 8 Android"`.
@@ -250,7 +250,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
 
 ### Phase A — native playback core
 
-- [ ] **T3: Media3 dependencies only**
+- [x] **T3: Media3 dependencies only**
   - Files: `android/variables.gradle` (add `media3Version = '1.11.0'` after the last entry,
     `cordovaAndroidVersion`), `android/app/build.gradle` (dependencies block, next to
     `implementation project(':capacitor-android')`).
@@ -588,3 +588,24 @@ Every line below is a command with an expected output and needs no human interve
 13. `npm run qa` exits `0`.
 14. `grep -rniE "room|sqlite|pinia|equalizer|audiofx|MediaLibraryService" src/ android/app/src/main/java/ package.json | wc -l` → `0`
 15. `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" | wc -l` → `0`
+
+## Recorded observations
+
+### T2 — deterministic audio fixtures + MediaStore indexing (2026-08-19)
+- **Codec used**: `libmp3lame` (available; no AAC/`.m4a` fallback needed). All three fixtures
+  are `.mp3`, `-id3v2_version 3`, `-codec:a libmp3lame -b:a 128k`.
+- **Scan method that worked**: the FIRST method in the ladder —
+  `adb -s emulator-5554 shell content call --uri content://media --method scan_file --arg /sdcard/Music/kefi-qa/f1.mp3`
+  (repeated once per file: f1.mp3, f2.mp3, f3.mp3). `scan_volume` and the `jobscheduler`
+  fallback were never needed.
+- **Observed durations** (from `content query`, ms): Άσπρη Μέρα = 5042, Zeibekiko = 7027,
+  Ωδή = 9038 — all within 500ms of the nominal 5000/7000/9000.
+- **`content query` projection gotcha**: the plan's example projection
+  `--projection title,artist,album,duration` (comma-separated) throws
+  `java.lang.IllegalArgumentException: Invalid column title,artist,album,duration` on this
+  API 36 `content` CLI. The correct separator per `adb shell content query --help` is a
+  **colon**: `--projection title:artist:album:duration`. `scripts/qa-fixtures.sh` and all
+  verification in this task use the colon form.
+- Greek tags (`Άσπρη Μέρα`, `Δήμητρα Παπαδοπούλου`, `Κέφι Vol 1`, `Ωδή`, `Κέφι Vol 2`) round-tripped
+  correctly through ffmpeg → ID3v2.3 → MediaStore with no mojibake, confirmed via both
+  `ffprobe -show_entries format_tags=...` on the local file and `content query` on the device.
