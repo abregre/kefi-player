@@ -162,6 +162,112 @@
   `content://media/external/audio/media/24` debug URI is still correct and T7 does not
   need to update it before deleting that debug branch.
 
+## T7 — PlayerPlugin.kt + JS bridge (2026-08-20)
+- NEW `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`: `@CapacitorPlugin(name =
+  "Player")`, methods `getPlayerState`, `playTrack({ uri, title?, artist? })`, `pause`,
+  `resume`, `seek({ positionMs })` — all `@PluginMethod fun x(call: PluginCall)` launched on
+  `App.scope.launch { }`, resolving/rejecting inside the coroutine. `rejectWith` is a private
+  `PluginCall` extension bridging `Throwable` → `Exception` (`call.reject` only accepts
+  `Exception`), copied in spirit from `YtdlpPlugin.kt:444-449`. `load()` only sets
+  `PlayerController.onState = { ... }`; `handleOnDestroy()` clears it back to `null`. Neither
+  touches `PlayerController` beyond that (no `ensureController()` trigger from `load()`, per
+  the first-touch rule) — the controller is first connected lazily, inside `getPlayerState`/
+  `playTrack`/etc., all of which are only ever invoked from a real user-gesture-originated
+  WebView call.
+- **Exact JSON key set emitted** (both `getPlayerState`'s resolve payload AND the
+  `playerState` push event use the identical `toJSObject()` extension on
+  `PlayerController.Snapshot`, so pull and push are byte-for-byte interchangeable):
+  `mediaId`, `uri`, `title`, `artist`, `currentPosition`, `duration`, `isPlaying`,
+  `shuffleModeEnabled`, `repeatMode`, `queueLength`, `currentIndex` — verbatim from T6's
+  `Snapshot` data class, in that field order (Kotlin `data class` declaration order; observed
+  identical order in every logcat line during QA, since `JSObject`/`org.json.JSONObject`
+  preserves insertion order in this Android runtime). Nullable fields (`mediaId`, `uri`,
+  `title`, `artist`) are written as explicit JSON `null` via `JSONObject.NULL` (not omitted),
+  so all 11 keys are always present even before any track is loaded — confirmed in the very
+  first `getPlayerState` call on mount:
+  `{"mediaId":null,"uri":null,"title":null,"artist":null,"currentPosition":0,"duration":0,"isPlaying":false,"shuffleModeEnabled":false,"repeatMode":0,"queueLength":0,"currentIndex":0}`.
+- **`MainActivity.java`**: added `onCreate(Bundle)` override calling
+  `registerPlugin(PlayerPlugin.class);` before `super.onCreate(savedInstanceState);`, matching
+  `ytmp3`'s `MainActivity.java:10-17` shape exactly (no `captureSharedUrl` — that was
+  yt-dlp-specific).
+- **JS side, plain JS + JSDoc, no `.ts` anywhere**: NEW `src/plugins/player.js` —
+  `export const Player = registerPlugin('Player', { web: () => import('./player.web').then((m) => new m.PlayerWeb()) })`,
+  with a `@typedef PlayerSnapshot` (the same 11 keys) and a `@typedef PlayerPlugin` JSDoc
+  block typing every method. NEW `src/plugins/player.web.js` — `PlayerWeb extends WebPlugin`,
+  keeps an in-memory snapshot object, `playTrack` seeds plausible mock title/artist/duration
+  (180000ms) and starts a 1s `setInterval` ticker that advances `currentPosition` and calls
+  `this.notifyListeners('playerState', ...)` while `isPlaying`; `pause`/`resume`/`seek`
+  mutate the same state and re-emit. Confirmed via `npm run build`: `player.web.js` is
+  code-split into its own lazy chunk (`dist/assets/player.web-*.js`, ~1.2KB), proving the
+  dynamic `import()` fallback wiring is correct and the native plugin path is never bundled
+  into the browser entry point.
+- **How the WebView call was triggered for QA** (real WebView-originated call, not a native
+  shortcut): added a TEMPORARY dev-only panel to `src/App.vue`, marked with
+  `// TODO(T8): replace with usePlayer composable` at both the import and the panel/style
+  blocks. It imports `Player` from `./plugins/player` directly (no composable — T8 owns
+  that), holds a `ref(null)` snapshot, calls `Player.addListener('playerState', ...)` +
+  `Player.getPlayerState()` in `onMounted`, and renders four buttons — "Play fixture (f1)"
+  (`Player.playTrack({ uri: 'content://media/external/audio/media/24', title: 'Άσπρη Μέρα',
+  artist: 'Δήμητρα Παπαδοπούλου' })`), "Pause", "Resume", "Refresh state" — plus a `<pre>`
+  showing `JSON.stringify(snapshot)`. Also added a temporary `watch(snapshot, ... =>
+  console.log('[T7 QA] playerState', JSON.stringify(value)))` (also marked
+  `// TODO(T8): remove`) purely so every snapshot is visible in `adb logcat` — Capacitor
+  forwards WebView `console.log` to Logcat under tag `Capacitor/Console`, which is what makes
+  the JS-layer state greppable at all from the native side. QA was driven with real
+  `adb shell input tap <x> <y>` taps on those on-screen buttons (coordinates read off an
+  `exec-out screencap`), never a native shortcut.
+- **What's left in `src/App.vue` for T8 to remove**: the whole dev panel
+  (`<script setup>` `Player` import, the `FIXTURE_URI`/`snapshot`/`listenerHandle`/`watch`
+  block, `refreshState`/`playFixture`/`pauseTrack`/`resumeTrack`, the `onMounted`/`onUnmounted`
+  wiring) and the `<section class="dev-player">` template block plus its `.dev-player*` CSS —
+  every one of these is marked with a `TODO(T8)` comment so a `grep -n "TODO(T8)" src/App.vue`
+  finds every piece.
+- **QA run against `emulator-5554`** (fixtures already present from T2, `_id=24` = f1/"Άσπρη
+  Μέρα", confirmed unchanged via `content query`): granted
+  `READ_MEDIA_AUDIO`/`POST_NOTIFICATIONS`, `adb logcat -c`, launched
+  `com.kefi.player/.MainActivity`, tapped "Play fixture (f1)", then tapped "Refresh state"
+  twice ~4s apart. Real captured logcat (via `Capacitor/Console`):
+  - `08-20 00:09:19.838 ... [T7 QA] playerState {...,"currentPosition":2,"duration":179999,"isPlaying":true,...}` — confirms `isPlaying:true` and real duration (179999ms) immediately after `playTrack`.
+  - Two "Refresh state" snapshots: `00:09:21.667` → `currentPosition:1795`; `00:09:25.693` →
+    `currentPosition:5619`. Delta = 3824ms over 4.026s wall-clock — inside the required
+    2500–5000ms window for a ≥3s gap.
+  - `adb logcat -d | grep -oE '"isPlaying":(true|false)'` → 8 `false` / 8 `true` (state
+    toggles across the button taps + initial mount read).
+  - **Note on the plan's literal grep** `grep -oE '\{"isPlaying":[^}]*\}'`: this produces
+    **zero matches** against our JSON, because `isPlaying` is the 7th key in T6's `Snapshot`
+    field order (`mediaId, uri, title, artist, currentPosition, duration, isPlaying, ...`),
+    not the first key right after `{`. The task's MUST DO section requires the *exact T6 key
+    set*, not a specific key order, so the field order was kept as declared in
+    `PlayerController.Snapshot` rather than reordered to make that one literal regex match.
+    Used `grep -oE '"isPlaying":(true|false)'` (substring, order-independent) instead, and
+    pasted full JSON lines above as the authoritative evidence.
+  - `adb shell dumpsys media_session | grep state=` →
+    `state=PlaybackState {state=PLAYING(3), position=11953, ...}` during the same session.
+  - `adb logcat -d | grep -icE "Exception|FATAL|AndroidRuntime"` → 4 hits, all unrelated to
+    `com.kefi.player` (an `EmojiCompatManager` `IllegalStateException` from the system
+    keyboard and a `WindowManager` `DeadObjectException` from a just-force-stopped window) —
+    zero exceptions traced to our plugin/controller code.
+- **No duplicate-session problem occurred.** T6's inherited-wisdom note warned that
+  connecting the first real `MediaController` might trigger `PlaybackService.onGetSession()`
+  to re-register the already-added session and throw. This did not happen: `PlaybackService`
+  still calls `addSession(mediaSession)` exactly once, unconditionally, in `onCreate()` (T5's
+  original call site), and `PlayerController.ensureController()` only ever calls
+  `MediaController.Builder(...).buildAsync()` against the existing token — it never calls
+  `addSession` itself. No `isSessionAdded` guard was added to `PlaybackService.kt` because no
+  failure was observed; `grep -icE "duplicate|isSessionAdded"` over the QA logcat = `0`.
+- **T5 debug entry point fully removed** from `PlaybackService.kt`: the `onStartCommand`
+  `if (intent?.action == ACTION_DEBUG_PLAY) { ... }` branch, the `private companion object`
+  holding `ACTION_DEBUG_PLAY`, and the hardcoded `content://media/external/audio/media/24`
+  fixture line are all gone (`grep -c "ACTION_DEBUG_PLAY\|content://media/external/audio/media/24" PlaybackService.kt` = `0`). `onStartCommand` itself is kept as a thin
+  `return super.onStartCommand(intent, flags, startId)` passthrough (only the debug branch
+  inside it was marked for removal, not the override itself) — `android.content.Intent` is
+  still imported for its signature; `android.net.Uri` and the `androidx.media3.common.MediaItem` import (both only used by the deleted debug branch) were dropped.
+- Verified: `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` = `0` (also confirmed
+  Java compiles: `:app:compileDebugJavaWithJavac` `BUILD SUCCESSFUL`). `npm run build`
+  succeeds (`player.web.js` correctly code-split, no TypeScript anywhere — no `.ts` file was
+  created). `npm run apk` → `BUILD SUCCESSFUL`, APK 8.7M (unchanged from T6, as expected — no
+  new dependency).
+
 ## T6 — PlayerController.kt application-scoped MediaController (2026-08-20)
 - NEW file `android/app/src/main/java/com/kefi/player/PlayerController.kt`, package
   `com.kefi.player`, Kotlin `object` (not a class) — an application-scoped singleton, same

@@ -1,11 +1,9 @@
 package com.kefi.player
 
 import android.content.Intent
-import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
@@ -70,21 +68,6 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // TODO(T7): remove — debug-only entry point to exercise this service before
-        // PlayerController/PlayerPlugin exist. Triggered manually with:
-        //   adb shell am start-foreground-service -a com.kefi.player.debug.PLAY \
-        //     -n com.kefi.player/.PlaybackService
-        if (intent?.action == ACTION_DEBUG_PLAY) {
-            val exoPlayer = player
-            if (exoPlayer != null) {
-                // TODO(T7): remove — hardcoded fixture (T2's f1.mp3 / "Άσπρη Μέρα",
-                // MediaStore _id=24, resolved via `content query`).
-                val fixtureUri = Uri.parse("content://media/external/audio/media/24")
-                exoPlayer.setMediaItem(MediaItem.fromUri(fixtureUri))
-                exoPlayer.prepare()
-                exoPlayer.play()
-            }
-        }
         return super.onStartCommand(intent, flags, startId)
     }
 
@@ -95,10 +78,5 @@ class PlaybackService : MediaSessionService() {
         session?.release()
         session = null
         super.onDestroy()
-    }
-
-    private companion object {
-        // TODO(T7): remove alongside onStartCommand's debug branch above.
-        const val ACTION_DEBUG_PLAY = "com.kefi.player.debug.PLAY"
     }
 }
