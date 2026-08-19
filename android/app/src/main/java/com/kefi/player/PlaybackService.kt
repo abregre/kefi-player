@@ -1,6 +1,7 @@
 package com.kefi.player
 
 import android.content.Intent
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -68,6 +69,27 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A null `intent` here is the documented signal that the OS is
+        // auto-restarting us after our *process* (not just the separate WebView
+        // renderer sandbox) previously crashed — e.g. an unhandled
+        // onRenderProcessGone taking the whole app down before MainActivity's
+        // recovery existed, or any other process-level kill. Confirmed on-device:
+        // this restart path always arrives with `intent == null` (measured
+        // `flags=0` here too — START_FLAG_RETRY is NOT set on this build, so it
+        // is not a usable signal; `intent == null` is). A restart like this never
+        // carries a reconnecting controller: onCreate() has already built a
+        // brand new empty ExoPlayer and addSession() has already unconditionally
+        // promoted us to a foreground service with a generic notification, even
+        // though there is nothing queued and nobody left to play it. Left alone
+        // this sits forever as a zombie "Now Playing" notification with
+        // `state=NONE`. Stop cleanly instead — a real client (MainActivity →
+        // PlayerController.ensureController()) will start us again properly,
+        // with actual content, when it needs to.
+        if (intent == null && (player?.mediaItemCount ?: 0) == 0) {
+            Log.i("KefiApp", "PlaybackService restarted with nothing to play, stopping cleanly")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return super.onStartCommand(intent, flags, startId)
     }
 

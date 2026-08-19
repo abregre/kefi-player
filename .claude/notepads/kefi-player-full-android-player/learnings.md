@@ -385,61 +385,109 @@
   for. Marked `// TODO(T13): replaced by the router shell` at the top of `<script setup>`
   and again on the `<section class="dev-player">` block; T13 owns deleting this file's
   content entirely.
-- **Critical environment finding — `always_finish_activities` does NOT finish backgrounded
-  Activities on this emulator (Pixel_7 API 36 / Android 16 / build `ro.build.version.sdk=36`,
-  `ro.build.version.release=16`).** Verified three ways: (1) our app with playback active:
-  after `settings put global always_finish_activities 1` + `input keyevent KEYCODE_HOME` +
-  10s wait, `dumpsys activity com.kefi.player` showed `mResumed=false mStopped=true
-  mFinished=false mDestroyed=false` and `pidof com.kefi.player` returned the SAME pid
-  throughout; (2) same result with no playback/service running at all (rules out the
-  foreground service pinning the process); (3) same result for the system Settings app
-  (`com.android.settings`) — rules out anything specific to our manifest/code. Also tried
-  `am start -R <N>` (`am help`: "Prior to each repeat, the top activity will be finished") —
-  it produced `Warning: Activity not started, its current task has been brought to the
-  front` / `"intent has been delivered to currently running top-most instance"`, i.e. no
-  finish either, consistent with `MainActivity`'s `android:launchMode="singleTask"` routing
-  repeat `am start` calls to `onNewIntent` instead. A full `settings put` → reboot → retest
-  cycle produced the identical non-finishing result, ruling out a stale-cache/persistence
-  explanation. **Conclusion: Scenario 1's `always_finish_activities` step does not actually
-  destroy the Activity/WebView on this AVD image — it only reliably exercises the
-  background→foreground (`visibilitychange`) path, not true WebView recreation.** This is an
-  emulator/platform characteristic outside the app's control (not fixable without touching
-  Kotlin, which is out of scope), and the plan's own wording already flags this mechanism as
-  only "the closest scriptable analogue," not a perfect one. Recorded here so future tasks
-  re-running this scenario (or building a stronger repro, e.g. actually forcing a process
-  kill via a debug-only native hook) know not to trust `mFinished`/`pidof` staying constant
-  as a sign of failure — it is this emulator's normal behavior. All literal script commands
-  and assertions from the plan were still run verbatim and DID pass on their own terms (see
-  below) via the visibilitychange/pull path, which is the mechanism T8 was actually gated on
-  proving.
-- **Scenario 1 — real output** (fixture: Άσπρη Μέρα, `_id=24`; tapped play at screen coords
-  `input tap 288 929`, i.e. "Play fixture (f1)" button):
-  - `settings put global always_finish_activities 1` → `settings get` confirmed `1`.
-  - After `input keyevent KEYCODE_HOME` + `sleep 10`: `dumpsys media_session` →
-    `state=PlaybackState {state=PLAYING(3), position=41993, ...}` — PASS (state=3 held).
-  - `am start -n com.kefi.player/.MainActivity` (→ `Warning: Activity not started, its
-    current task has been brought to the front`, per the finding above) + `sleep 2`, then
-    **immediately** (dumpsys and logcat pulled back-to-back with no extra sleep in between,
-    to avoid comparing two readings taken seconds apart — see timing-sensitivity note below):
-    `dumpsys media_session` → `position=41993`; WebView's last `[T8 QA] playerState` logcat
-    line → `{"mediaId":"content://media/external/audio/media/24","uri":"content://...
-    /24","title":"Άσπρη Μέρα","artist":"Δήμητρα Παπαδοπούλου","currentPosition":42633,
-    "duration":179999,"isPlaying":true,...}`. Non-null track: PASS. `|41993-42633| = 640ms`:
-    PASS (within 3000ms).
-  - `settings put global always_finish_activities 0` afterward (via a `trap ... EXIT` in the
-    test script, so it fires even on assertion failure) → confirmed back to `0`.
-  - **Timing sensitivity found**: an earlier run of this exact scenario with a full `sleep 5`
-    between the relaunch `am start` and reading dumpsys/logcat produced a **4081ms delta**
-    (FAIL by the 3000ms bar) using the same code — not a regression, a measurement artifact.
-    Root cause: Media3's `Player.Listener` only pushes on discrete events (see the
-    no-polling note above), so the ref's `currentPosition` is frozen at whatever the last
-    pull/push wrote; real playback keeps advancing underneath it. Comparing a WebView
-    snapshot taken at T against a `dumpsys` reading taken at T+3s will show close to a 3s
-    (or whatever the gap is) apparent "drift" that has nothing to do with staleness-on-
-    resume — it's just elapsed wall-clock time between two independently-timed reads. Later
-    tasks re-running this scenario (or writing a permanent QA script) MUST read `dumpsys`
-    and the WebView's log line back-to-back with minimal shell round-trips in between, not
-    with a multi-second sleep before the comparison, or they will see false failures here.
+- **SUPERSEDED FINDING, corrected after independent coordinator review —
+  `always_finish_activities` is a no-op on this platform, and Scenario 1 as originally
+  scripted proves nothing.** Confirmed (both by me and independently by the coordinator):
+  with the setting at `1`, after `KEYCODE_HOME` + wait, `dumpsys activity activities` still
+  shows the identical `ActivityRecord` in history (`mFinished=false mDestroyed=false`, same
+  `pidof` throughout) — verified against our app with and without playback running, and
+  against the system Settings app, ruling out anything specific to our manifest/code. `am
+  start -R <N>` also fails to force recreation (`MainActivity`'s `android:launchMode=
+  "singleTask"` routes repeat `am start` calls to `onNewIntent`, never a finish). **This is
+  not a real destruction mechanism on this AVD** — do not trust it, and do not reuse it as
+  "Scenario 1" in later tasks.
+- **The coordinator found the REAL defect this gate exists to catch**: the WebView renderer
+  runs in its own separate sandboxed process
+  (`com.google.android.webview:sandboxed_process0:...`), independent of `com.kefi.player`'s
+  own process. With `adb root` (already enabled on this `google_apis` image), killing that
+  renderer process (`kill -9 <sandboxed_process0 pid>`, found via `adb shell ps -A | grep
+  sandboxed_process0`) while a track was playing reproduced a real crash:
+  `chromium: [ERROR:aw_browser_terminator.cc(113)] Render process kill (OOM or update)
+  wasn't handed by all associated webviews, killing application.` → `ActivityManager:
+  Process com.kefi.player (pid ...) has died: fg TOP` → `Scheduling restart of crashed
+  service com.kefi.player/.PlaybackService in 1000ms for start-requested`. Because nothing
+  overrode `onRenderProcessGone`, WebView's default behaviour killed the ENTIRE app process
+  (not just the renderer sandbox), taking `PlaybackService`/`PlayerController` down with it —
+  exactly the failure this plan's premise ("the WebView/Bridge can be destroyed while the
+  MediaSessionService keeps playing") was supposed to prevent, and exactly what a
+  screen-off, backgrounded music player is most likely to hit under real memory pressure.
+  I reproduced this independently before touching any code: pid changed (`5396`→`5518`),
+  `dumpsys media_session` dropped to `state=NONE(0), position=0` — total playback loss.
+- **Fix 1 — `MainActivity.java`** (`android/app/src/main/java/com/kefi/player/MainActivity.java`):
+  after `super.onCreate(savedInstanceState)`, `getBridge().addWebViewListener(new
+  WebViewListener() { onRenderProcessGone(...) { Log.w("KefiApp", "renderer gone,
+  recovering"); recreate(); return true; } })`. `com.getcapacitor.WebViewListener` is
+  Capacitor's own public extension point for exactly this
+  (`BridgeWebViewClient.onRenderProcessGone` already iterates `bridge.getWebViewListeners()`
+  and returns `true` if any listener does) — no need to replace/subclass the WebViewClient
+  by hand. Returning `true` tells the framework the death is handled, which stops it from
+  killing the app process; the dead WebView object itself can never be reused, so
+  `recreate()` tears down and rebuilds the Activity (and gets a fresh WebView) while
+  `PlaybackService` (a separate OS process from the renderer, and now never killed by this
+  path) keeps playing underneath it unaffected. `getBridge()` must be called AFTER
+  `super.onCreate(...)` — `BridgeActivity.onCreate()` is what actually constructs `bridge`
+  (via its `load()` at the end); calling `getBridge()` before `super.onCreate()` would NPE.
+- **Fix 2 — `PlaybackService.kt`, item 2 (zombie restart)**: confirmed the coordinator's
+  suspicion for real. Before any fix, forcing the whole `com.kefi.player` process to die
+  (`kill -9 <app pid>`, distinct from the renderer-only kill Fix 1 targets — e.g. a genuine
+  OOM kill of the whole process would hit this same path) and letting the OS auto-restart
+  `PlaybackService` left a **real zombie**: `dumpsys activity services com.kefi.player` still
+  showed `isForeground=true foregroundId=1001` with the full `channel=playback` media-style
+  notification (confirmed also in `dumpsys notification --noredact`), while
+  `dumpsys media_session` simultaneously reported `state=NONE(0), position=0` — a "Now
+  Playing" notification for nothing. Root cause: `onCreate()` unconditionally builds a fresh
+  empty `ExoPlayer`/`MediaSession` and `addSession()` unconditionally promotes to foreground,
+  regardless of whether anyone is actually about to play something. Tried gating this on
+  `Service.START_FLAG_RETRY` first (the documented "restarted after a crash" flag) but
+  **measured `flags=0` on every restart on this build — that flag is not set here, so it is
+  not a usable signal on this platform.** Added a temporary log
+  (`flags=$flags intentIsNull=${intent == null} mediaItemCount=...`) and found the reliable
+  signal actually is `intent == null` (also documented Android behavior: a service killed
+  while started is redelivered via `onStartCommand(null, flags, startId)`) — measured
+  `intentIsNull=true mediaItemCount=0` on every such restart, `intentIsNull=false` on every
+  legitimate start. Final fix in `onStartCommand`: `if (intent == null &&
+  (player?.mediaItemCount ?: 0) == 0) { Log.i("KefiApp", "PlaybackService restarted with
+  nothing to play, stopping cleanly"); stopSelf(); return START_NOT_STICKY }`. Verified this
+  clears the zombie completely: after the fix, the same whole-process `kill -9` still shows
+  the OS auto-restarting the service (`KefiApp onCreate` fires again, then immediately
+  `PlaybackService restarted with nothing to play, stopping cleanly`), and 4s later
+  `dumpsys activity services com.kefi.player` has **no `PlaybackService` ServiceRecord at
+  all**, `dumpsys notification --noredact | grep -c "pkg=com.kefi.player"` = `0`, and
+  `dumpsys media_session` shows only `state=null` — clean, no zombie, no lingering
+  notification.
+- **Scenario 1 (FINAL, corrected) — real output**, renderer-kill replacing the no-op
+  `always_finish_activities` version (fixture: Άσπρη Μέρα `_id=24`, played via `input tap 289
+  928`): launched, played, waited 5s to build up real position, recorded
+  `APP_PID(before)=7558`, `RENDERER_PID=7583` (via `ps -A | grep sandboxed_process0`), and
+  `dumpsys media_session` → `state=PlaybackState {state=PLAYING(3), position=2810, ...}`.
+  Then `adb shell kill -9 7583` (renderer only). Polled logcat every 100ms for a fresh
+  `[T8 QA] playerState` line (detected after ~200ms) and immediately (same shell
+  round-trip, no extra sleep) read `dumpsys media_session` + the latest WebView log line:
+  - `APP_PID(after)=7558` — **PASS**, app process survived the renderer death (Fix 1 working;
+    contrast with the pre-fix repro where pid changed `5396`→`5518`).
+  - `dumpsys media_session` → `state=PlaybackState {state=PLAYING(3), position=2810, ...}` —
+    **PASS**, `state=3` held continuously, playback never interrupted by the renderer crash.
+  - WebView's post-recovery `[T8 QA] playerState` line (from `MainActivity.recreate()` →
+    fresh WebView mount → `usePlayer().initialize()` → the pull-on-mount path):
+    `{"mediaId":"content://media/external/audio/media/24","uri":"content://...
+    /24","title":"Άσπρη Μέρα","artist":"Δήμητρα Παπαδοπούλου","currentPosition":4763,
+    "duration":179999,"isPlaying":true,...}` — non-null track: **PASS**.
+  - `|dumpsys position 2810 − WebView currentPosition 4763| = 1953ms`: **PASS** (within
+    3000ms). (The WebView's live-queried `getPlayerState()` value legitimately being AHEAD of
+    `dumpsys`'s figure is expected and fine — Media3's own internal periodic push to the
+    system `MediaSession` only ticks roughly once a second while playing, so `dumpsys` can
+    itself lag a live `MediaController.currentPosition` read by up to ~1s; this is unrelated
+    to our own no-push-while-idle behavior in `usePlayer.js` and does not affect the
+    3000ms budget.)
+  - `KefiApp: renderer gone, recovering` present in logcat exactly once, immediately before
+    the fresh mount. `logcat -d | grep -icE "FATAL EXCEPTION|AndroidRuntime.*com.kefi.player"`
+    = `0`.
+  - **Timing-sensitivity note carried over from the earlier attempt**: comparing a WebView
+    snapshot against a `dumpsys` reading taken several seconds apart (rather than
+    back-to-back) produces large apparent "drift" (seen as high as ~20s in an earlier,
+    improperly-timed rerun of this exact scenario) that is pure measurement lag, not a
+    staleness bug — see the no-polling design note above. Any later re-run of this scenario
+    MUST read `dumpsys` and the WebView's log line immediately adjacent to each other.
 - **Scenario 2 — real output** (swipe from recents): `input keyevent KEYCODE_APP_SWITCH` then
   a plain vertical `input swipe` on the card only dragged it sideways (this recents UI scrolls
   horizontally, revealing a "Clear all" pill rather than dismissing on an up-swipe) — the
@@ -465,6 +513,11 @@
   leaving the emulator in a normal state for later tasks.
 - Verified: `npm run build` → `vite build` succeeded, `player.web.js` still its own lazy
   chunk, no `.ts` file created anywhere. `npm run apk` → `BUILD SUCCESSFUL`, APK 8.7M
-  (unchanged size — no new native dependency, pure JS/Vue change).
-- Did NOT touch any Kotlin file, `scripts/`, `package.json`, `android/` (other than the
-  already-built `app-debug.apk` output, not source), or any plan checkbox.
+  (unchanged size). `./gradlew :app:compileDebugKotlin :app:compileDebugJavaWithJavac` clean
+  after the `MainActivity.java`/`PlaybackService.kt` fixes.
+- **Follow-up scope note**: after the coordinator's independent re-test surfaced the real
+  renderer-death defect (see Fix 1/Fix 2 above), `MainActivity.java` and `PlaybackService.kt`
+  were modified — the only two native files this task touched, both explicitly authorized by
+  the coordinator for this exact purpose. `PlayerController.kt`, `PlayerPlugin.kt`, and every
+  other Kotlin/Java file untouched. Still did not touch `scripts/`, `package.json`, any plan
+  checkbox, or add any Gradle dependency.

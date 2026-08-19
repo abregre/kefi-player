@@ -1,8 +1,12 @@
 package com.kefi.player;
 
 import android.os.Bundle;
+import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
 
@@ -12,5 +16,25 @@ public class MainActivity extends BridgeActivity {
         // npm-installed ones are, and must be registered before the bridge starts.
         registerPlugin(PlayerPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // A backgrounded music player spends most of its life with the screen off,
+        // which is exactly when Android is most likely to reclaim the WebView's
+        // renderer process under memory pressure. That renderer runs in its own
+        // separate sandboxed process, but WebView's default behaviour when nothing
+        // handles onRenderProcessGone is to kill the WHOLE app process — taking
+        // PlayerController/PlaybackService and the music down with it. Returning
+        // true tells the framework this is handled; the dead WebView object can't
+        // be reused, so recreate() tears down and rebuilds the Activity (and a
+        // fresh WebView) while the already-running PlaybackService/MediaSession
+        // (a separate process from the renderer) keeps playing underneath it —
+        // this is the real rehydration path T8's usePlayer composable is for.
+        getBridge().addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView webView, RenderProcessGoneDetail detail) {
+                Log.w("KefiApp", "renderer gone, recovering");
+                recreate();
+                return true;
+            }
+        });
     }
 }
