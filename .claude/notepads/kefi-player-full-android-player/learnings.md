@@ -161,3 +161,77 @@
   originally recorded value, so `PlaybackService.kt`'s hardcoded
   `content://media/external/audio/media/24` debug URI is still correct and T7 does not
   need to update it before deleting that debug branch.
+
+## T6 — PlayerController.kt application-scoped MediaController (2026-08-20)
+- NEW file `android/app/src/main/java/com/kefi/player/PlayerController.kt`, package
+  `com.kefi.player`, Kotlin `object` (not a class) — an application-scoped singleton, same
+  shape as `App`'s companion object. Confirmed via `javap` against the real
+  `media3-session-1.11.0-api.jar` / `media3-common-1.11.0-runtime.jar` before writing any
+  code (method signatures below are exact, not guessed).
+- **`Snapshot` — exact key names T7 must use verbatim** (Kotlin `data class
+  PlayerController.Snapshot`, T7 serialises straight to JSON so field order doesn't
+  matter, names do):
+  `mediaId: String?`, `uri: String?`, `title: String?`, `artist: String?`,
+  `currentPosition: Long`, `duration: Long`, `isPlaying: Boolean`,
+  `shuffleModeEnabled: Boolean`, `repeatMode: Int`, `queueLength: Int`, `currentIndex: Int`.
+  `mediaId`/`uri`/`title`/`artist` are all nullable (null when no current item, or when
+  metadata was never set). `duration` is normalised: `C.TIME_UNSET` (the raw value
+  `MediaController.getDuration()` returns before the item is prepared/buffered) is mapped
+  to `0L` so T7 never has to special-case a huge negative sentinel when it JSON-serialises
+  this straight to the JS bridge. `currentPosition` is passed through raw (uncommon for it
+  to be unset). `queueLength` = `mediaItemCount`, `currentIndex` = `currentMediaItemIndex`.
+- **Exact public method signatures** (all `suspend fun`, all on `PlayerController`, all
+  safe to call from any dispatcher — they internally hop to `Dispatchers.Main`):
+  - `suspend fun snapshot(): Snapshot`
+  - `suspend fun play(item: MediaItem)` — replaces the queue with a single item
+    (`setMediaItem` + `prepare` + `play`). Takes a full `androidx.media3.common.MediaItem`
+    (not a bare URI string) so the caller can attach `MediaMetadata.title`/`.artist` before
+    playback starts and `snapshot()`/the listener broadcast read real title/artist back
+    immediately — T7 should build the `MediaItem` (e.g.
+    `MediaItem.Builder().setUri(uri).setMediaId(uri).setMediaMetadata(MediaMetadata.Builder().setTitle(t).setArtist(a).build()).build()`)
+    from whatever it already queried off `MediaStore`/`content query`, then call
+    `PlayerController.play(item)`.
+  - `suspend fun pause()`
+  - `suspend fun resume()` — plain `play()` on the existing item/position, no queue/seek
+    side effects.
+  - `suspend fun seek(positionMs: Long)`
+  - `suspend fun next()` / `suspend fun previous()` — `seekToNext()` / `seekToPrevious()`.
+  - `suspend fun setQueue(items: List<MediaItem>, startIndex: Int = 0)` — full queue
+    replace + prepare + play at `startIndex`.
+  - `suspend fun setShuffle(enabled: Boolean)`
+  - `suspend fun setRepeatMode(repeatMode: Int)` — takes Media3's own
+    `Player.REPEAT_MODE_OFF` / `_ONE` / `_ALL` int constants, not a custom enum.
+  - `var onState: ((Snapshot) -> Unit)?` — settable property, not a method. T7 sets this
+    once (e.g. in `load()`) and forwards every invocation to `notifyListeners("playerState",
+    ...)`. Invoked on `Dispatchers.Main` from inside the one `Player.Listener` registered
+    on the controller, for: `onIsPlayingChanged`, `onMediaItemTransition`,
+    `onPlaybackStateChanged`, `onShuffleModeEnabledChanged`, `onRepeatModeChanged`, and
+    `onPlayerError` (T11 will add skip logic there; T6 only re-broadcasts state, no
+    behavior yet — left a `TODO(T11)` comment on that branch).
+- **How the future was awaited** (no Guava/`concurrent-futures-ktx` dependency added, per
+  the plan's constraint — Media3 does NOT put Guava's `ListenableFuture.get()`-with-executor
+  convenience or AndroidX's `.await()` extension on this classpath by default, only the raw
+  `com.google.common.util.concurrent.ListenableFuture` interface via
+  `MediaController.Builder.buildAsync()`): wrapped in
+  `suspendCancellableCoroutine { cont -> future.addListener({ ... cont.resume(future.get()) ... }, ContextCompat.getMainExecutor(App.instance)) }`,
+  with `cont.invokeOnCancellation { MediaController.releaseFuture(future) }`. The whole
+  `ensureController()` body (building the `SessionToken`/`MediaController.Builder` and
+  awaiting the coroutine) runs inside `withContext(Dispatchers.Main)`, itself inside
+  `initLock.withLock { }` (double-checked: `controller?.let { return it }` before AND
+  inside the lock), guarded by `@Volatile private var controller: MediaController?` —
+  exact mirror of `com.ytmp3.app.App.ensureNativeToolsReady()`'s shape (`initLock`,
+  `@Volatile` flag/field checked outside then inside the lock), reusing `App.instance` and
+  never creating a new `CoroutineScope` (no `App.scope.launch` inside `PlayerController`
+  itself — callers, i.e. T7, are expected to launch from their own scope/coroutine and
+  just `await`/call these `suspend fun`s).
+- `ContextCompat` (`androidx.core.content.ContextCompat`) is on the classpath transitively
+  via `androidx.appcompat:appcompat` / `androidx.core:core-splashscreen` — confirmed
+  `ContextCompat.class` present in the resolved `core-1.17.0-api.jar` in the Gradle cache
+  before using it; no new dependency was added.
+- Verified: `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` = `0`.
+  `npm run apk 2>&1 | grep -c "BUILD SUCCESSFUL"` = `1` (APK 8.7M). Pure compile gate per
+  the plan — nothing calls `PlayerController` yet (T5's debug entry point in
+  `PlaybackService.kt` is untouched, `PlayerController` has zero callers until T7), so no
+  runtime/device verification was attempted or is meaningful yet.
+- Did NOT touch `PlaybackService.kt`, `MainActivity.java`, `scripts/`, or any plan
+  checkboxes. Did NOT add any Gradle dependency.
