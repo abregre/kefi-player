@@ -309,7 +309,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     5. `shell dumpsys notification --noredact | grep -A25 "pkg=com.kefi.player"` shows
        `channel=playback` and `android.template=...MediaStyle`.
 
-- [ ] **T6: `PlayerController.kt` application-scoped `MediaController`**
+- [x] **T6: `PlayerController.kt` application-scoped `MediaController`**
   - Files: NEW `android/app/src/main/java/com/kefi/player/PlayerController.kt`.
   - `@Volatile` + `Mutex` double-checked async init mirroring the *shape* of
     `/mnt/X/myProjects/ytmp3/android/app/src/main/java/com/ytmp3/app/App.kt:31-52`; reuse
@@ -321,7 +321,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     a user-gesture-originated plugin call.
   - QA Scenario: compile gate — `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` prints `0`.
 
-- [ ] **T7: `PlayerPlugin.kt` + JS bridge**
+- [x] **T7: `PlayerPlugin.kt` + JS bridge**
   - Files: NEW `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`;
     `android/app/src/main/java/com/kefi/player/MainActivity.java` (add
     `registerPlugin(PlayerPlugin.class);` before `super.onCreate(...)`);
@@ -342,10 +342,12 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     (`currentMediaItem`, `currentPosition`, `duration`, `isPlaying`, `shuffle`, `repeatMode`)
     — never a cached value. Remove T5's debug entry point.
   - QA Scenario: `$EMU logcat -c`, launch, call `playTrack` with the `f1` URI from the web
-    layer, then `$EMU logcat -d | grep -oE '\{"isPlaying":[^}]*\}'` shows `"isPlaying":true`
-    and two snapshots ≥3s apart show `positionMs` increasing by 2500–5000ms.
+    layer, then `$EMU logcat -d | grep -oE '"isPlaying":(true|false)'` shows `"isPlaying":true`
+    and two snapshots >= 3s apart show `currentPosition` increasing by 2500-5000ms.
+    (NOT `grep -oE '\{"isPlaying":[^}]*\}'` — `isPlaying` is the 7th key in T6's snapshot
+    contract, not the first, so that anchored pattern can never match. Found in T7.)
 
-- [ ] **T8: GATE — state rehydration across WebView destruction**
+- [x] **T8: GATE — state rehydration across WebView destruction**
   - Files: NEW `src/composables/usePlayer.js`; `src/App.vue` (temporary read-out).
   - Pattern: module-level refs and `readonly(...)` exposure as
     `/mnt/X/myProjects/ytmp3/src/composables/useDownloads.ts:30-45` and `:246-268`;
@@ -354,10 +356,15 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     (`getPlayerState()` on mount and on every `visibilitychange` → visible). Never render from
     a cached value after resume.
   - QA Scenario (all scripted, all must pass):
-    1. `$EMU shell settings put global always_finish_activities 1`; play; `input keyevent KEYCODE_HOME`;
-       sleep 10; `dumpsys media_session` still `state=3`; `am start -n com.kefi.player/.MainActivity`;
-       sleep 5; the WebView reports a non-null track and a position within 3000ms of the
-       `dumpsys` position; finally `settings put global always_finish_activities 0`.
+    1. **Renderer kill** (replaces the original `always_finish_activities` version, which is a
+       NO-OP on API 36 — the ActivityRecord survives HOME with the setting on, verified twice).
+       The WebView renderer runs in its own sandboxed process, so killing it destroys the entire
+       JS heap while the service plays on — a strictly harsher and more realistic test:
+       play; `RPID=$($EMU shell ps -A | grep sandboxed_process0 | awk '{print $2}')`;
+       `$EMU shell kill -9 $RPID`; sleep 12. Assert: the app PID is UNCHANGED, `state=3` holds with
+       the position still advancing, `logcat` contains `renderer gone, recovering` and ZERO
+       `killing application`, and the rebuilt WebView repopulates from a fresh `getPlayerState()`
+       within 3000ms of the `dumpsys` position.
     2. `input keyevent KEYCODE_APP_SWITCH`, dismiss the task; assert no crash in logcat and
        that playback state follows Media3's default `onTaskRemoved` behaviour (still playing
        while active).
@@ -366,7 +373,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
   - **This task gates everything after it.** If it fails, stop and redesign the state flow;
     do not continue to T9.
 
-- [ ] **T9: `TrackSource.kt`, `READ_MEDIA_AUDIO`, `listTracks`, `getArtwork`**
+- [x] **T9: `TrackSource.kt`, `READ_MEDIA_AUDIO`, `listTracks`, `getArtwork`**
   - Files: NEW `android/app/src/main/java/com/kefi/player/TrackSource.kt`;
     `PlayerPlugin.kt`; `src/plugins/player.js`; `AndroidManifest.xml` (permissions added in T5
     are already present — verify only).
@@ -393,7 +400,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     3. `getArtwork` for `Άσπρη Μέρα` returns a `dataUrl` starting `data:image/jpeg;base64,`;
        for `Zeibekiko` it returns `null`.
 
-- [ ] **T10: Queue, next/previous, shuffle, repeat**
+- [x] **T10: Queue, next/previous, shuffle, repeat**
   - Files: `PlayerController.kt`, `PlayerPlugin.kt`, `src/plugins/player.js`.
   - `setQueue({ uris, startIndex })` → `controller.setMediaItems(items, startIndex, 0L)`;
     `next()`, `previous()`; `setShuffle({ enabled })` → `shuffleModeEnabled`;
@@ -403,7 +410,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `Άσπρη Μέρα`; `next()` → `Zeibekiko`; `previous()` → `Άσπρη Μέρα`; `setRepeatMode({mode:'one'})`
     then `getPlayerState` reports `repeatMode: "one"`; logcat has zero exceptions.
 
-- [ ] **T11: Unavailable-track degradation**
+- [x] **T11: Unavailable-track degradation**
   - Files: `PlayerController.kt` (`Player.Listener.onPlayerError`), `PlayerPlugin.kt`,
     `src/composables/usePlayer.js`.
   - Catch `PlaybackException` whose cause is `FileNotFoundException`/`SecurityException`, skip
@@ -414,7 +421,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `dumpsys media_session` shows `Zeibekiko` playing. Restore the fixture afterwards via
     `scripts/qa-fixtures.sh`.
 
-- [ ] **T12: Session persistence (queue, index, position, shuffle, repeat)**
+- [x] **T12: Session persistence (queue, index, position, shuffle, repeat)**
   - Files: NEW `android/app/src/main/java/com/kefi/player/PlaybackStateStore.kt`;
     `PlaybackService.kt`; `PlayerController.kt`.
   - `context.getSharedPreferences("kefi.player", MODE_PRIVATE)` with a `player.` key prefix,
