@@ -341,3 +341,130 @@
   runtime/device verification was attempted or is meaningful yet.
 - Did NOT touch `PlaybackService.kt`, `MainActivity.java`, `scripts/`, or any plan
   checkboxes. Did NOT add any Gradle dependency.
+
+## T8 — usePlayer composable, push + pull-on-resume rehydration (GATE) (2026-08-20)
+- NEW `src/composables/usePlayer.js`. Module-level refs (outside `usePlayer()`, one shared
+  instance) for all 11 `PlayerSnapshot` keys plus a `stateError` ref, mirroring
+  `useDownloads.ts:30-45`. `applySnapshot()` (composables/usePlayer.js:37-50) is the single
+  place that writes all 11 fields from a `PlayerSnapshot`, called by both halves.
+  `errorMessage()` (composables/usePlayer.js:29-33) is the error-normalisation helper,
+  copied in spirit from `useDownloads.ts:65-69`.
+  - **PUSH subscription**: `attachListeners()`, `src/composables/usePlayer.js:65-72` —
+    `await Player.addListener('playerState', (snapshot) => applySnapshot(snapshot))` inside
+    an `if (listenersReady) return; listenersReady = true` guard (module-level `let
+    listenersReady = false` at line 60), attached exactly once for the app's lifetime,
+    mirroring `useDownloads.ts:55,76-115`.
+  - **PULL-on-resume handler** (the load-bearing half): `refreshState()` at
+    `src/composables/usePlayer.js:82-89` does the actual live `await Player.getPlayerState()`
+    + `applySnapshot()` (never renders from a cached ref). `attachVisibilityHandler()` at
+    `src/composables/usePlayer.js:97-105` registers `document.addEventListener('visibilitychange',
+    () => { if (document.visibilityState === 'visible') refreshState() })` behind its own
+    `visibilityHandlerReady` guard (also attached exactly once). `initialize()` (returned from
+    `usePlayer()`, `src/composables/usePlayer.js:114-119`) calls `attachListeners()` +
+    `attachVisibilityHandler()` + an unconditional first `refreshState()` — so the very first
+    render is always a fresh pull, never a stale default.
+  - No `setInterval`/polling anywhere in the file — verified
+    `grep -c "setInterval\|setTimeout" src/composables/usePlayer.js` = `0`. Position goes
+    stale in the refs between push events during steady playback (Media3's `Player.Listener`
+    only fires on discrete state transitions — `onIsPlayingChanged`,
+    `onMediaItemTransition`, `onPlaybackStateChanged`, etc. — there is NO periodic position
+    tick), by design; only a fresh pull (mount or visibilitychange→visible) re-syncs it. This
+    is expected per the plan's Must-NOT-Have and is not a bug — later tasks that build a real
+    UI (T13+) will need their own local interpolation/rAF timer for smooth on-screen ticking
+    between pulls, which is explicitly out of scope for T8.
+- `src/App.vue` rewritten: removed all T7 `TODO(T8)` dev-panel code, now imports and calls
+  `usePlayer()` in `onMounted` (`player.initialize()`), renders a `computed` snapshot of all
+  11 keys in a `<pre>`, and keeps a `watch(snapshot, ...)` → `console.log('[T8 QA]
+  playerState', ...)` so logcat can observe WebView state (Capacitor forwards WebView
+  console output to `adb logcat` under tag `Capacitor/Console`). Kept the same 4 QA buttons
+  (Play fixture (f1)/Pause/Resume/Refresh state) from T7, now wired through
+  `usePlayer()`'s `playTrack`/`pause`/`resume`/`refreshState` actions instead of calling the
+  `Player` plugin directly — judged in-scope because T7 already had these buttons for
+  identical QA purposes and MUST NOT DO only bans *new* UI (mini-player/track list/views);
+  swapping their backing implementation is exactly what this task's Expected Outcome asked
+  for. Marked `// TODO(T13): replaced by the router shell` at the top of `<script setup>`
+  and again on the `<section class="dev-player">` block; T13 owns deleting this file's
+  content entirely.
+- **Critical environment finding — `always_finish_activities` does NOT finish backgrounded
+  Activities on this emulator (Pixel_7 API 36 / Android 16 / build `ro.build.version.sdk=36`,
+  `ro.build.version.release=16`).** Verified three ways: (1) our app with playback active:
+  after `settings put global always_finish_activities 1` + `input keyevent KEYCODE_HOME` +
+  10s wait, `dumpsys activity com.kefi.player` showed `mResumed=false mStopped=true
+  mFinished=false mDestroyed=false` and `pidof com.kefi.player` returned the SAME pid
+  throughout; (2) same result with no playback/service running at all (rules out the
+  foreground service pinning the process); (3) same result for the system Settings app
+  (`com.android.settings`) — rules out anything specific to our manifest/code. Also tried
+  `am start -R <N>` (`am help`: "Prior to each repeat, the top activity will be finished") —
+  it produced `Warning: Activity not started, its current task has been brought to the
+  front` / `"intent has been delivered to currently running top-most instance"`, i.e. no
+  finish either, consistent with `MainActivity`'s `android:launchMode="singleTask"` routing
+  repeat `am start` calls to `onNewIntent` instead. A full `settings put` → reboot → retest
+  cycle produced the identical non-finishing result, ruling out a stale-cache/persistence
+  explanation. **Conclusion: Scenario 1's `always_finish_activities` step does not actually
+  destroy the Activity/WebView on this AVD image — it only reliably exercises the
+  background→foreground (`visibilitychange`) path, not true WebView recreation.** This is an
+  emulator/platform characteristic outside the app's control (not fixable without touching
+  Kotlin, which is out of scope), and the plan's own wording already flags this mechanism as
+  only "the closest scriptable analogue," not a perfect one. Recorded here so future tasks
+  re-running this scenario (or building a stronger repro, e.g. actually forcing a process
+  kill via a debug-only native hook) know not to trust `mFinished`/`pidof` staying constant
+  as a sign of failure — it is this emulator's normal behavior. All literal script commands
+  and assertions from the plan were still run verbatim and DID pass on their own terms (see
+  below) via the visibilitychange/pull path, which is the mechanism T8 was actually gated on
+  proving.
+- **Scenario 1 — real output** (fixture: Άσπρη Μέρα, `_id=24`; tapped play at screen coords
+  `input tap 288 929`, i.e. "Play fixture (f1)" button):
+  - `settings put global always_finish_activities 1` → `settings get` confirmed `1`.
+  - After `input keyevent KEYCODE_HOME` + `sleep 10`: `dumpsys media_session` →
+    `state=PlaybackState {state=PLAYING(3), position=41993, ...}` — PASS (state=3 held).
+  - `am start -n com.kefi.player/.MainActivity` (→ `Warning: Activity not started, its
+    current task has been brought to the front`, per the finding above) + `sleep 2`, then
+    **immediately** (dumpsys and logcat pulled back-to-back with no extra sleep in between,
+    to avoid comparing two readings taken seconds apart — see timing-sensitivity note below):
+    `dumpsys media_session` → `position=41993`; WebView's last `[T8 QA] playerState` logcat
+    line → `{"mediaId":"content://media/external/audio/media/24","uri":"content://...
+    /24","title":"Άσπρη Μέρα","artist":"Δήμητρα Παπαδοπούλου","currentPosition":42633,
+    "duration":179999,"isPlaying":true,...}`. Non-null track: PASS. `|41993-42633| = 640ms`:
+    PASS (within 3000ms).
+  - `settings put global always_finish_activities 0` afterward (via a `trap ... EXIT` in the
+    test script, so it fires even on assertion failure) → confirmed back to `0`.
+  - **Timing sensitivity found**: an earlier run of this exact scenario with a full `sleep 5`
+    between the relaunch `am start` and reading dumpsys/logcat produced a **4081ms delta**
+    (FAIL by the 3000ms bar) using the same code — not a regression, a measurement artifact.
+    Root cause: Media3's `Player.Listener` only pushes on discrete events (see the
+    no-polling note above), so the ref's `currentPosition` is frozen at whatever the last
+    pull/push wrote; real playback keeps advancing underneath it. Comparing a WebView
+    snapshot taken at T against a `dumpsys` reading taken at T+3s will show close to a 3s
+    (or whatever the gap is) apparent "drift" that has nothing to do with staleness-on-
+    resume — it's just elapsed wall-clock time between two independently-timed reads. Later
+    tasks re-running this scenario (or writing a permanent QA script) MUST read `dumpsys`
+    and the WebView's log line back-to-back with minimal shell round-trips in between, not
+    with a multi-second sleep before the comparison, or they will see false failures here.
+- **Scenario 2 — real output** (swipe from recents): `input keyevent KEYCODE_APP_SWITCH` then
+  a plain vertical `input swipe` on the card only dragged it sideways (this recents UI scrolls
+  horizontally, revealing a "Clear all" pill rather than dismissing on an up-swipe) — the
+  working dismiss action on this launcher is tapping the **"Clear all"** button (found via
+  screenshot at real coords `(212, 1194)` on a 1080×2400 screen). After tapping it:
+  `dumpsys activity activities | grep -c "com.kefi.player/.MainActivity"` → `0` (task truly
+  gone from Recents), but `pidof com.kefi.player` stayed the **same pid** (`4811`,
+  unchanged), `dumpsys activity services com.kefi.player` still showed
+  `ServiceRecord{...：/.PlaybackService}` with `isForeground=true foregroundId=1001
+  types=0x00000002` and the `channel=playback` notification, and `dumpsys media_session` →
+  `state=PlaybackState {state=PLAYING(3), position=24063, ...}` (position continuing to
+  advance on a follow-up read). `adb logcat -d | grep -icE "FATAL EXCEPTION|AndroidRuntime.*
+  com.kefi.player|Process: com.kefi.player.*has died"` → `0`. Screenshot after dismissal
+  showed the home screen with no crash dialog. **PASS**: no crash, Media3's default
+  (not-overridden) `onTaskRemoved` kept the service+playback alive because it was actively
+  playing, exactly as T5/T7 established `onTaskRemoved` is never overridden.
+- **Scenario 3 — real output** (screen-off, same still-playing background session from
+  Scenario 2 — task already cleared from Recents, service still running): P1 = `42080`
+  (`dumpsys media_session` `position=`). `input keyevent KEYCODE_POWER`, `sleep 15`. P2 =
+  `57073`. `dumpsys media_session` showed `state=PlaybackState {state=PLAYING(3), ...}` at
+  both reads. `P2 - P1 = 14993ms >= 12000ms`: **PASS**. Screen woken back up afterward
+  (`KEYCODE_POWER` again) and confirmed `dumpsys power | grep mWakefulness=` → `Awake`,
+  leaving the emulator in a normal state for later tasks.
+- Verified: `npm run build` → `vite build` succeeded, `player.web.js` still its own lazy
+  chunk, no `.ts` file created anywhere. `npm run apk` → `BUILD SUCCESSFUL`, APK 8.7M
+  (unchanged size — no new native dependency, pure JS/Vue change).
+- Did NOT touch any Kotlin file, `scripts/`, `package.json`, `android/` (other than the
+  already-built `app-debug.apk` output, not source), or any plan checkbox.

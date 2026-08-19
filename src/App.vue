@@ -1,56 +1,52 @@
 <script setup>
+// TODO(T13): replaced by the router shell — this whole file is a temporary
+// state read-out, not real UI. It exists only so T8-T12's QA can observe
+// WebView-side player state (via the <pre> below and the console.log, which
+// Capacitor forwards to `adb logcat`).
 import { Capacitor } from '@capacitor/core'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
-// TODO(T8): replace this whole dev panel with the usePlayer composable.
-import { Player } from './plugins/player'
+import { computed, onMounted, watch } from 'vue'
+import { usePlayer } from './composables/usePlayer'
 
 const platform = Capacitor.getPlatform()
 const isNative = Capacitor.isNativePlatform()
 
-// TODO(T8): replace with usePlayer composable — this is a temporary, dev-only
-// panel to drive the Player plugin bridge from the WebView for T7 QA (there is
-// no real UI yet). T2's f1.mp3 fixture ("Άσπρη Μέρα", MediaStore _id=24).
-const FIXTURE_URI = 'content://media/external/audio/media/24'
-const snapshot = ref(null)
-let listenerHandle
+const player = usePlayer()
 
-// TODO(T8): remove — console.log makes every snapshot visible in `adb logcat`
-// (Capacitor forwards WebView console output to Logcat), which is how T7's QA
-// grep confirms the bridge is live from the web layer.
+// T2's f1.mp3 fixture ("Άσπρη Μέρα", MediaStore _id=24) — same fixture T7 used.
+const FIXTURE_URI = 'content://media/external/audio/media/24'
+
+const snapshot = computed(() => ({
+  mediaId: player.mediaId.value,
+  uri: player.uri.value,
+  title: player.title.value,
+  artist: player.artist.value,
+  currentPosition: player.currentPosition.value,
+  duration: player.duration.value,
+  isPlaying: player.isPlaying.value,
+  shuffleModeEnabled: player.shuffleModeEnabled.value,
+  repeatMode: player.repeatMode.value,
+  queueLength: player.queueLength.value,
+  currentIndex: player.currentIndex.value,
+}))
+
+// Makes every snapshot visible in `adb logcat` (Capacitor forwards WebView
+// console output under tag `Capacitor/Console`) — the T8 QA scenarios read
+// WebView-side state through logcat, not through the screen.
 watch(snapshot, (value) => {
-  if (value) console.log('[T7 QA] playerState', JSON.stringify(value))
+  console.log('[T8 QA] playerState', JSON.stringify(value))
 })
 
-async function refreshState() {
-  snapshot.value = await Player.getPlayerState()
-}
+onMounted(() => {
+  player.initialize()
+})
 
-async function playFixture() {
-  snapshot.value = await Player.playTrack({
+function playFixture() {
+  player.playTrack({
     uri: FIXTURE_URI,
     title: 'Άσπρη Μέρα',
     artist: 'Δήμητρα Παπαδοπούλου',
   })
 }
-
-async function pauseTrack() {
-  snapshot.value = await Player.pause()
-}
-
-async function resumeTrack() {
-  snapshot.value = await Player.resume()
-}
-
-onMounted(async () => {
-  listenerHandle = await Player.addListener('playerState', (state) => {
-    snapshot.value = state
-  })
-  await refreshState()
-})
-
-onUnmounted(() => {
-  listenerHandle?.remove()
-})
 </script>
 
 <template>
@@ -65,14 +61,14 @@ onUnmounted(() => {
       <dd>{{ isNative ? 'native WebView' : 'browser' }}</dd>
     </dl>
 
-    <!-- TODO(T8): replace with usePlayer composable — dev-only Player bridge panel -->
+    <!-- TODO(T13): replaced by the router shell — usePlayer-driven read-out -->
     <section class="dev-player">
-      <h2>Player bridge (dev, T7 QA)</h2>
+      <h2>Player state (dev, usePlayer)</h2>
       <div class="dev-player-actions">
         <button type="button" @click="playFixture">Play fixture (f1)</button>
-        <button type="button" @click="pauseTrack">Pause</button>
-        <button type="button" @click="resumeTrack">Resume</button>
-        <button type="button" @click="refreshState">Refresh state</button>
+        <button type="button" @click="player.pause">Pause</button>
+        <button type="button" @click="player.resume">Resume</button>
+        <button type="button" @click="player.refreshState">Refresh state</button>
       </div>
       <pre class="dev-player-state">{{ JSON.stringify(snapshot) }}</pre>
     </section>
@@ -124,7 +120,7 @@ dd {
   margin: 0;
 }
 
-/* TODO(T8): remove alongside the dev-only Player bridge panel above. */
+/* TODO(T13): remove alongside the rest of this temporary read-out. */
 .dev-player {
   padding: 1rem;
   background: var(--surface-1);
