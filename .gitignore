@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Android signing — NEVER commit these. Leaking the keystore means anyone can
+# publish updates that impersonate your app, and it cannot be rotated for
+# already-installed users.
+android/keystore.properties
+*.jks
+*.keystore
+
+# Android build output
+android/app/build
+android/build
+android/.gradle
+android/local.properties
+android/app/src/main/assets/public

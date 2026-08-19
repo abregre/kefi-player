@@ -1,0 +1,117 @@
+/* Bundled Inter + Roboto (see scripts/fetch-fonts.py). Must precede all rules. */
+@import './assets/fonts/fonts.css';
+
+/*
+ * Design tokens for the whole app. Every component reads these; no component
+ * hardcodes a colour, so retheming is a single-file change.
+ *
+ * The palette is warm on purpose — "kefi" is high spirits, and a music player
+ * spends most of its life on the Now Playing screen, where a warm dark ground
+ * makes album artwork the brightest thing on screen.
+ *
+ * Two contrast decisions worth keeping:
+ *  - Amber #ffb020 is a signal colour, not a text colour: it clears 4.5:1 on the
+ *    dark ground but not on light surfaces. It drives progress fills, the play
+ *    button and focus rings.
+ *  - Text on top of an accent fill uses --on-accent (near-black), which clears
+ *    4.5:1 against both amber and coral. Never put --text on an accent fill.
+ */
+:root {
+  --bg: #14100f;
+  --surface-1: #1e1917;
+  --surface-2: #2b2320;
+  --border: #453833;
+  --text: #f7f1ea;
+  --text-muted: #b3a49a;
+
+  /* Signal amber: fills, progress, focus. Not for text on light surfaces. */
+  --accent: #ffb020;
+  --accent-strong: #f2820c;
+  --accent-deep: #e0453f;
+  --accent-soft: #2f231a;
+  --on-accent: #14100f;
+
+  --success: #58c98b;
+  --danger: #ff6b6b;
+  --danger-soft: #3a1a1a;
+
+  /* Safe-area insets, so screens can pad without repeating env() everywhere. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /*
+   * Two families: Inter for UI and body text (large x-height, built for
+   * screens), Roboto for titles and section headings. Swap the two values to
+   * flip the roles. Both are bundled with Latin, Latin Extended and Greek --
+   * bundled rather than linked because the app runs in an offline WebView.
+   */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  font-family: var(--font-sans);
+  color-scheme: dark;
+  background-color: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf5ef;
+    --surface-1: #ffffff;
+    --surface-2: #f0e7dc;
+    --border: #ddcdbd;
+    --text: #14100f;
+    --text-muted: #6d5f56;
+
+    /* Darkened so accent-coloured text still clears 4.5:1 on a white card. */
+    --accent: #b3660a;
+    --accent-strong: #c25a08;
+    --accent-deep: #b8302b;
+    --accent-soft: #fdeecf;
+    --on-accent: #fffaf3;
+
+    --success: #1c7a4a;
+    --danger: #c62828;
+    --danger-soft: #fdecec;
+
+    color-scheme: light;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  /*
+   * The WebView must not bounce or rubber-band: a music player has a fixed
+   * mini-player at the bottom, and an overscrolling body drags it off screen.
+   */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

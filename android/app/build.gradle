@@ -1,0 +1,108 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+    namespace = "com.kefi.player"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.kefi.player"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    // Optional release signing. Create android/keystore.properties with:
+    //   storeFile=/absolute/path/to/kefi-player.jks
+    //   storePassword=...
+    //   keyAlias=...
+    //   keyPassword=...
+    // `npm run keystore` generates both the key and that file. Without it, only
+    // debug builds are signed.
+    def keystorePropsFile = rootProject.file('keystore.properties')
+    def hasKeystore = keystorePropsFile.exists()
+    if (hasKeystore) {
+        def keystoreProps = new Properties()
+        keystorePropsFile.withInputStream { keystoreProps.load(it) }
+
+        // A stale storeFile path (typically the key was moved after it was
+        // created) otherwise surfaces as AGP's terse "Keystore file not found"
+        // mid-build. Fail early and say what to do -- but only when a release
+        // build was actually asked for, so debug builds keep working with no key.
+        def storeFilePath = keystoreProps['storeFile']
+        def keystoreFile = storeFilePath ? file(storeFilePath) : null
+        def wantsRelease = gradle.startParameter.taskNames.any {
+            it.toLowerCase().contains('release')
+        }
+        if (wantsRelease && (keystoreFile == null || !keystoreFile.exists())) {
+            throw new GradleException(
+                "Release signing key not found.\n\n" +
+                "  android/keystore.properties says:\n    storeFile=${storeFilePath}\n" +
+                "  ...but no file exists there.\n\n" +
+                "Either fix that path (did you move the .jks?), or create a new key with:\n" +
+                "    npm run keystore\n"
+            )
+        }
+
+        signingConfigs {
+            release {
+                storeFile keystoreFile
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    // Java compatibility is set to 21 by the generated capacitor.build.gradle,
+    // which is applied after this block. Kotlin must match it exactly or the
+    // JVM-target validation task fails.
+    kotlinOptions {
+        jvmTarget = '21'
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
