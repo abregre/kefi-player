@@ -43,9 +43,9 @@ ffmpeg -y -hide_banner -loglevel error \
   -f lavfi -i "color=c=orange:s=600x600:d=1" -frames:v 1 \
   "$LOCAL_DIR/cover.png"
 
-# f1.mp3 — Άσπρη Μέρα / Δήμητρα Παπαδοπούλου / Κέφι Vol 1 / 5s / embedded art
+# f1.mp3 — Άσπρη Μέρα / Δήμητρα Παπαδοπούλου / Κέφι Vol 1 / 180s / embedded art
 ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=440:duration=5" \
+  -f lavfi -i "sine=frequency=440:duration=180" \
   -i "$LOCAL_DIR/cover.png" \
   -map 0:a -map 1:v \
   -metadata title="Άσπρη Μέρα" \
@@ -57,9 +57,9 @@ ffmpeg -y -hide_banner -loglevel error \
   -codec:v copy -disposition:v attached_pic \
   "$LOCAL_DIR/f1.$EXT"
 
-# f2 — Zeibekiko / Nikos Alexiou / Kefi Vol 1 / 7s / no art
+# f2 — Zeibekiko / Nikos Alexiou / Kefi Vol 1 / 210s / no art
 ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=523:duration=7" \
+  -f lavfi -i "sine=frequency=523:duration=210" \
   -metadata title="Zeibekiko" \
   -metadata artist="Nikos Alexiou" \
   -metadata album="Kefi Vol 1" \
@@ -68,9 +68,9 @@ ffmpeg -y -hide_banner -loglevel error \
   -codec:a "$AUDIO_CODEC" -b:a 128k \
   "$LOCAL_DIR/f2.$EXT"
 
-# f3 — Ωδή / Δήμητρα Παπαδοπούλου / Κέφι Vol 2 / 9s / no art
+# f3 — Ωδή / Δήμητρα Παπαδοπούλου / Κέφι Vol 2 / 240s / no art
 ffmpeg -y -hide_banner -loglevel error \
-  -f lavfi -i "sine=frequency=659:duration=9" \
+  -f lavfi -i "sine=frequency=659:duration=240" \
   -metadata title="Ωδή" \
   -metadata artist="Δήμητρα Παπαδοπούλου" \
   -metadata album="Κέφι Vol 2" \
@@ -97,7 +97,7 @@ done
 "${ADB[@]}" push "$LOCAL_DIR/." "$REMOTE_DIR/"
 
 # Verification helper: query MediaStore and check for exactly 3 correctly
-# tagged rows with the expected durations (within 500ms).
+# tagged rows with the expected durations (within 1500ms).
 verify() {
   local out
   out=$("${ADB[@]}" shell content query --uri content://media/external/audio/media \
@@ -118,9 +118,9 @@ verify() {
   d3=$(printf '%s\n' "$out" | grep "title=Ωδή" | grep -oE "duration=[0-9]+" | cut -d= -f2)
 
   [[ -n "$d1" && -n "$d2" && -n "$d3" ]] || return 1
-  (( d1 > 4500 && d1 < 5500 )) || return 1
-  (( d2 > 6500 && d2 < 7500 )) || return 1
-  (( d3 > 8500 && d3 < 9500 )) || return 1
+  (( d1 > 178500 && d1 < 181500 )) || return 1
+  (( d2 > 208500 && d2 < 211500 )) || return 1
+  (( d3 > 238500 && d3 < 241500 )) || return 1
 
   return 0
 }

@@ -134,3 +134,30 @@
 - Greek ID3 tags round-trip cleanly end to end (ffmpeg encode → ID3v2.3 → MediaStore `content query`) with no mojibake — verified both via `ffprobe -show_entries format_tags=...` and on-device `content query`.
 - `scripts/qa-fixtures.sh <serial>` (default `emulator-5554`) is idempotent: verified by running it twice back-to-back — both runs report the same 3 rows, no duplicates, no schema drift.
 - Found and fixed a real bug during testing: `if ffmpeg -encoders 2>/dev/null | grep -q libmp3lame; then` is unsafe under `set -euo pipefail` — `grep -q` closing the pipe early on match SIGPIPEs ffmpeg, and pipefail then reports the pipeline's exit status as ffmpeg's non-zero SIGPIPE code (141) instead of grep's 0, flipping the branch to the fallback even though the encoder is present. Fix: capture ffmpeg's output into a variable first (`FFMPEG_ENCODERS="$(ffmpeg ... 2>/dev/null)"`), then `grep -q ... <<<"$FFMPEG_ENCODERS"`. Applies to any `set -euo pipefail` script piping a full/slow producer into `grep -q`.
+
+## Fixture duration fix (2026-08-19, corrective task discovered while verifying T5)
+- The original 5/7/9s fixtures made T8's ">= 12000ms position advance across a 15s
+  screen-off window" and T12's "play 20s then force-stop" assertions physically
+  impossible — the 9s max track ended and the session dropped to `STOPPED` mid-assertion.
+  Plan's constants table (and `scripts/qa-fixtures.sh`) updated to 180s/210s/240s, keeping
+  frequencies (440/523/659 Hz), titles/artists/albums/track numbers, `-id3v2_version 3`,
+  `libmp3lame -b:a 128k`, and embedded art on f1 only — all byte-identical metadata, only
+  the `duration=` values in the three `ffmpeg -f lavfi -i "sine=frequency=...:duration=N"`
+  lines and the `verify()` tolerance windows (now ±1500ms around 180000/210000/240000)
+  changed.
+- New local file sizes (`/tmp/kefi-qa/`): f1.mp3 = 2,883,703 bytes (180s), f2.mp3 =
+  3,361,352 bytes (210s), f3.mp3 = 3,841,212 bytes (240s). Total push ~10.1MB, completed
+  in well under 1s over adb (41.5 MB/s first run, 295.5 MB/s second run — device cache).
+- New durations confirmed two ways: local `ffprobe -show_entries format=duration` gave
+  180.035918s / 210.050612s / 240.039184s; on-device `content query` gave duration=180036 /
+  210051 / 240039 (ms) for Άσπρη Μέρα / Zeibekiko / Ωδή respectively — both well within the
+  1500ms tolerance.
+- Re-ran `scripts/qa-fixtures.sh emulator-5554` twice back-to-back. Both runs: exactly 3
+  `is_music=1` rows, no duplicates. **MediaStore `_id` values did NOT change** —
+  re-pushing/re-scanning the same paths updated the existing rows in place rather than
+  inserting new ones. Confirmed via `content query --projection _id:title:duration
+  --where "is_music=1"` after the second run: `_id=23` Ωδή (240039), `_id=24` Άσπρη Μέρα
+  (180036), `_id=25` Zeibekiko (210051). `_id=24` for Άσπρη Μέρα is unchanged from T5's
+  originally recorded value, so `PlaybackService.kt`'s hardcoded
+  `content://media/external/audio/media/24` debug URI is still correct and T7 does not
+  need to update it before deleting that debug branch.

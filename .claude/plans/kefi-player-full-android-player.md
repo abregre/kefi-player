@@ -125,12 +125,19 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
   `JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto ANDROID_HOME=/home/nonos/Android/Sdk`
 - Build tools: `~/Android/Sdk/build-tools/36.0.0/{aapt2,apksigner}`
 - Fixture directory on device: `/sdcard/Music/kefi-qa/`
+- `content query --projection` takes **colon**-separated columns (`title:artist:album`).
+  The comma form throws `IllegalArgumentException: Invalid column` on API 36 — verified in T2.
 - Fixtures (generated in T2, distinct durations make every assertion unambiguous):
   | file | title | artist | album | duration | art |
   |---|---|---|---|---|---|
-  | `f1.mp3` | `Άσπρη Μέρα` | `Δήμητρα Παπαδοπούλου` | `Κέφι Vol 1` | 5s | embedded |
-  | `f2.mp3` | `Zeibekiko` | `Nikos Alexiou` | `Kefi Vol 1` | 7s | none |
-  | `f3.mp3` | `Ωδή` | `Δήμητρα Παπαδοπούλου` | `Κέφι Vol 2` | 9s | none |
+  | `f1.mp3` | `Άσπρη Μέρα` | `Δήμητρα Παπαδοπούλου` | `Κέφι Vol 1` | 180s | embedded |
+  | `f2.mp3` | `Zeibekiko` | `Nikos Alexiou` | `Kefi Vol 1` | 210s | none |
+  | `f3.mp3` | `Ωδή` | `Δήμητρα Παπαδοπούλου` | `Κέφι Vol 2` | 240s | none |
+
+  **Durations are load-bearing, not cosmetic.** T8 asserts position advances >= 12000ms
+  across a 15s screen-off window and T12 plays for 20s before a force-stop; the original
+  5/7/9s fixtures made both assertions impossible because the track ended first (found
+  empirically while verifying T5). Keep every fixture longer than the longest timed wait.
   Expected groupings: **3 songs, 2 albums, 2 artists**; mixed Greek/Latin titles exercise
   Greek collation and search.
 
@@ -227,12 +234,12 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     nothing; `$EMU shell getprop ro.build.version.sdk` prints `36` (or `35` with the fallback
     recorded).
 
-- [ ] **T2: Deterministic audio fixtures + a working MediaStore indexing method**
+- [x] **T2: Deterministic audio fixtures + a working MediaStore indexing method**
   - Files: NEW `scripts/qa-fixtures.sh`.
   - The app has no downloader, so library content must be manufactured. `ffmpeg 6.1.1` is
     installed; generate the three fixtures from the constants table:
-    `ffmpeg -f lavfi -i "sine=frequency=440:duration=5" -metadata title="Άσπρη Μέρα" -metadata artist="Δήμητρα Παπαδοπούλου" -metadata album="Κέφι Vol 1" -metadata track="1" -id3v2_version 3 -codec:a libmp3lame -b:a 128k /tmp/kefi-qa/f1.mp3`
-    (frequencies 440/523/659 Hz and durations 5/7/9s keep the three distinguishable). If
+    `ffmpeg -f lavfi -i "sine=frequency=440:duration=180" -metadata title="Άσπρη Μέρα" -metadata artist="Δήμητρα Παπαδοπούλου" -metadata album="Κέφι Vol 1" -metadata track="1" -id3v2_version 3 -codec:a libmp3lame -b:a 128k /tmp/kefi-qa/f1.mp3`
+    (frequencies 440/523/659 Hz and durations 180/210/240s keep the three distinguishable). If
     `libmp3lame` is unavailable, fall back to `-c:a aac` with `.m4a` and record it.
     For `f1.mp3` attach cover art generated with
     `ffmpeg -f lavfi -i color=c=orange:s=600x600:d=1 -frames:v 1 /tmp/kefi-qa/cover.png`
@@ -243,9 +250,9 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     3. `$EMU shell content call --uri content://media --method scan_volume --arg external_primary`
     4. `$EMU shell cmd jobscheduler run -f com.android.providers.media.module -201`
   - QA Scenario:
-    `$EMU shell content query --uri content://media/external/audio/media --projection title,artist,album,duration --where "is_music=1 AND album LIKE '%efi%' OR album LIKE '%έφι%'"`
+    `$EMU shell content query --uri content://media/external/audio/media --projection title:artist:album:duration --where "is_music=1 AND album LIKE '%efi%' OR album LIKE '%έφι%'"`
     returns exactly 3 rows whose titles are `Άσπρη Μέρα`, `Zeibekiko`, `Ωδή` with durations
-    within 500ms of 5000/7000/9000. The working method is written into "## Recorded
+    within 1500ms of 180000/210000/240000. The working method is written into "## Recorded
     observations" in this file.
 
 ### Phase A — native playback core
@@ -263,7 +270,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `0` (Media3 ships no native libraries — a non-zero count means a forbidden artifact was
     added). Commit alone.
 
-- [ ] **T4: `App.kt` application-scoped singleton**
+- [x] **T4: `App.kt` application-scoped singleton**
   - Files: NEW `android/app/src/main/java/com/kefi/player/App.kt`;
     `android/app/src/main/AndroidManifest.xml` (add `android:name=".App"` to `<application>`).
   - Pattern: `/mnt/X/myProjects/ytmp3/android/app/src/main/java/com/ytmp3/app/App.kt:13-29`
@@ -273,7 +280,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     install and launch, then `$EMU logcat -d | grep -c "KefiApp onCreate"` is `>= 1` (add that
     one `Log.i` line).
 
-- [ ] **T5: `PlaybackService.kt` + manifest, one hardcoded fixture track**
+- [x] **T5: `PlaybackService.kt` + manifest, one hardcoded fixture track**
   - Files: NEW `android/app/src/main/java/com/kefi/player/PlaybackService.kt`;
     `android/app/src/main/AndroidManifest.xml`; `android/app/src/main/res/values/strings.xml`
     (add `playback_channel_name`).
@@ -290,7 +297,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `<receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">`
     with the `android.intent.action.MEDIA_BUTTON` action.
   - Temporarily hardcode a `MediaItem` built from the `f1.mp3` content URI resolved with
-    `$EMU shell content query --uri content://media/external/audio/media --projection _id,title --where "title='Άσπρη Μέρα'"`, started by a debug entry point removed in T7.
+    `$EMU shell content query --uri content://media/external/audio/media --projection _id:title --where "title='Άσπρη Μέρα'"`, started by a debug entry point removed in T7.
   - QA Scenario, all on `$EMU`:
     1. `shell dumpsys activity services com.kefi.player | grep -A5 PlaybackService` shows the
        service running with `foregroundServiceType` including `mediaPlayback`.
@@ -507,7 +514,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     off → all → one. Every control renders from `getPlayerState`, never local component
     state, so it survives resume.
   - QA Scenario: drag the seek bar to the midpoint of `Ωδή` — position lands within 3000ms of
-    4500ms and `state=3` resumes; `next`/`previous` change the `dumpsys media_session` title in
+    120000ms and `state=3` resumes; `next`/`previous` change the `dumpsys media_session` title in
     both directions; toggling shuffle then re-reading `getPlayerState` reports
     `shuffle: true`; killing and relaunching the app (T12) leaves the repeat/shuffle toggles
     rendering the restored values.
@@ -600,7 +607,17 @@ Every line below is a command with an expected output and needs no human interve
   fallback were never needed.
 - **Observed durations** (from `content query`, ms): Άσπρη Μέρα = 5042, Zeibekiko = 7027,
   Ωδή = 9038 — all within 500ms of the nominal 5000/7000/9000.
-- **`content query` projection gotcha**: the plan's example projection
+- **Corrected (2026-08-19, post-T5 verification)**: the 5/7/9s durations above made T8's
+  ">= 12000ms position advance across a 15s screen-off window" and T12's "play 20s then
+  force-stop" assertions physically impossible — the track ended and the session dropped
+  to `STOPPED` before the timed wait completed. Fixtures were regenerated at 180s/210s/240s
+  (frequencies 440/523/659 Hz, all other metadata unchanged). New observed durations (ms):
+  Άσπρη Μέρα = 180036, Zeibekiko = 210051, Ωδή = 240039 — all within 1500ms of the nominal
+  180000/210000/240000. `scripts/qa-fixtures.sh` verified idempotent again at the new
+  durations (two consecutive runs, still exactly 3 rows, no duplicates). MediaStore `_id`
+  values were unchanged by the re-index (23/24/25, updated in place, not re-inserted); see
+  `learnings.md` for full detail.
+- **`content query` projection gotcha**: the plan's original example projection
   `--projection title,artist,album,duration` (comma-separated) throws
   `java.lang.IllegalArgumentException: Invalid column title,artist,album,duration` on this
   API 36 `content` CLI. The correct separator per `adb shell content query --help` is a
