@@ -15,16 +15,17 @@ const isNative = Capacitor.isNativePlatform()
 
 const player = usePlayer()
 
-// T2's f1.mp3 fixture ("Άσπρη Μέρα", MediaStore _id=24) — same fixture T7 used.
-const FIXTURE_URI = 'content://media/external/audio/media/24'
+// T12 housekeeping: MediaStore ids renumber whenever fixtures are deleted/rescanned (T11's
+// QA already did this once — a hardcoded id here would go stale silently). Resolve by title
+// via listTracks() at call time instead, so this panel can never go stale again.
+// T10 QA order: Άσπρη Μέρα, Zeibekiko, Ωδή, so `startIndex: 0` lands on Άσπρη Μέρα per the
+// plan's QA scenario.
+const FIXTURE_TITLES = ['Άσπρη Μέρα', 'Zeibekiko', 'Ωδή']
 
-// T10 QA: all 3 fixtures (Ωδή=23, Άσπρη Μέρα=24, Zeibekiko=25), in this order so
-// `startIndex: 0` lands on Άσπρη Μέρα per the plan's QA scenario.
-const QUEUE_URIS = [
-  'content://media/external/audio/media/24',
-  'content://media/external/audio/media/25',
-  'content://media/external/audio/media/23',
-]
+async function resolveTrackByTitle(title) {
+  const { tracks } = await Player.listTracks()
+  return tracks.find((t) => t.title === title)
+}
 
 // T9 QA state: track listing, permission checks, artwork lookups.
 const permissionResult = ref(null)
@@ -62,12 +63,13 @@ onMounted(() => {
   player.initialize()
 })
 
-function playFixture() {
-  player.playTrack({
-    uri: FIXTURE_URI,
-    title: 'Άσπρη Μέρα',
-    artist: 'Δήμητρα Παπαδοπούλου',
-  })
+async function playFixture() {
+  const track = await resolveTrackByTitle('Άσπρη Μέρα')
+  if (!track) {
+    console.log('[T12 QA] playFixture: fixture not found via listTracks()')
+    return
+  }
+  player.playTrack({ uri: track.uri, title: track.title, artist: track.artist })
 }
 
 // T9 QA helpers — logged so `adb logcat` can capture results even without reading the screen.
@@ -99,11 +101,28 @@ async function getArtworkFor(trackId) {
   console.log('[T9 QA] getArtwork', trackId, JSON.stringify({ dataUrl: preview }))
 }
 
+// T12 housekeeping: resolve the fixture's current MediaStore id by title instead of
+// hardcoding it, same reasoning as playFixture/queueFixtures above.
+async function getArtworkForTitle(title) {
+  const track = await resolveTrackByTitle(title)
+  if (!track) {
+    console.log('[T12 QA] getArtwork: fixture not found via listTracks()', title)
+    return
+  }
+  await getArtworkFor(track.id)
+}
+
 // T10 QA helpers — usePlayer doesn't (and shouldn't) wrap queue/shuffle/repeat, so this dev
 // panel talks to the plugin directly for those, same precedent as the T9 helpers above.
 // Every result is also console.logged so `adb logcat` (Capacitor/Console) can observe it.
 async function queueFixtures() {
-  const result = await Player.setQueue({ uris: QUEUE_URIS, startIndex: 0 })
+  const tracks = await Promise.all(FIXTURE_TITLES.map(resolveTrackByTitle))
+  const uris = tracks.filter(Boolean).map((t) => t.uri)
+  if (uris.length === 0) {
+    console.log('[T12 QA] queueFixtures: no fixtures found via listTracks()')
+    return
+  }
+  const result = await Player.setQueue({ uris, startIndex: 0 })
   console.log('[T10 QA] setQueue', JSON.stringify(result))
 }
 
@@ -185,8 +204,8 @@ async function seekTo(positionMs) {
         <button type="button" @click="checkAudioPermission">Check permission</button>
         <button type="button" @click="requestAudioPermission">Request permission</button>
         <button type="button" @click="listTracks">List tracks</button>
-        <button type="button" @click="getArtworkFor(24)">Artwork (Άσπρη Μέρα)</button>
-        <button type="button" @click="getArtworkFor(25)">Artwork (Zeibekiko)</button>
+        <button type="button" @click="getArtworkForTitle('Άσπρη Μέρα')">Artwork (Άσπρη Μέρα)</button>
+        <button type="button" @click="getArtworkForTitle('Zeibekiko')">Artwork (Zeibekiko)</button>
       </div>
       <pre class="dev-player-state">{{ JSON.stringify(permissionResult) }}</pre>
       <pre class="dev-player-state">{{ JSON.stringify(tracksResult) }}</pre>

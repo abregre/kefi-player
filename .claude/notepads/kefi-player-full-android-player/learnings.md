@@ -877,3 +877,206 @@ smooth bar with zero extra IPC.
 - Did NOT touch `PlaybackService.kt`, `MainActivity.java`, `TrackSource.kt`, or any plan
   checkbox. Did NOT implement persistence (T12), library UI, or any Phase B work. Did NOT add
   a polling loop, npm/Gradle dependency, or any `.ts` file.
+
+## T12 — Session persistence (queue, index, position, shuffle, repeat) (2026-08-20)
+- **NEW `android/app/src/main/java/com/kefi/player/PlaybackStateStore.kt`**: single
+  SharedPreferences file `context.getSharedPreferences("kefi.player", MODE_PRIVATE)` — exact
+  mirror of `com.ytmp3.app.StorageLocation`'s one-file convention
+  (`StorageLocation.kt:40-83`). Keys, all `player.`-prefixed exactly as specified:
+  `player.queue` (JSON array of uri strings via `org.json.JSONArray`, no new dependency),
+  `player.index` (Int), `player.positionMs` (Long), `player.shuffle` (Boolean),
+  `player.repeat` (Int — see the repeatMode decision below), `player.savedAt` (Long,
+  `System.currentTimeMillis()`, write timestamp only — nothing reads it back yet).
+- **`repeatMode` storage decision**: persisted as Media3's **raw `Player.REPEAT_MODE_*` Int**
+  (`player.repeat`), not the `off|one|all` string. Reasoning: the restore path
+  (`PlaybackStateStore.restore()` → `PlaybackService.onCreate()`) writes straight to the
+  native `ExoPlayer.repeatMode` property, which is Media3's Int type — storing the Int avoids
+  a redundant string round-trip on the pure-native restore path. T10's frozen `off|one|all`
+  STRING contract to JS is untouched: `PlayerPlugin.kt`'s existing `repeatModeToString()` (at
+  the plugin boundary) still converts the Int on every `getPlayerState`/push-event read, same
+  as before T12 — confirmed live: after restoring `player.repeat=1`, `getPlayerState` from
+  the WebView returned `"repeatMode":"one"` (see QA below). No changes needed to
+  `PlayerPlugin.kt` for this task.
+- **Write triggers** (`PlayerController.kt`): added `persistState()` — reads the controller's
+  current queue (`(0 until ctrl.mediaItemCount).mapNotNull { ctrl.getMediaItemAt(it)
+  .localConfiguration?.uri?.toString() }`), index, position, shuffle, repeat, and calls
+  `PlaybackStateStore.save(...)` (a no-op if the queue is empty). Called immediately from
+  **every** branch of the existing `Player.Listener` that already calls `broadcastState()` —
+  `onIsPlayingChanged`, `onMediaItemTransition`, `onPlaybackStateChanged`,
+  `onShuffleModeEnabledChanged`, `onRepeatModeChanged`, and T11's `onPlayerError` skip/stop
+  branch. The task text named only `onMediaItemTransition`/`onIsPlayingChanged` as "immediate"
+  triggers, but wiring `onShuffleModeEnabledChanged`/`onRepeatModeChanged` too was necessary,
+  not optional: calling `setShuffle`/`setRepeatMode` fires ONLY those two callbacks (never
+  `onMediaItemTransition`/`onIsPlayingChanged`), so without this a shuffle/repeat change made
+  without also changing track or play state would never persist at all — this is exactly
+  Scenario 5's shape (set shuffle+repeat while already playing, no track change), and it
+  passed live (see QA below). `SharedPreferences.Editor.apply()` commits asynchronously, so
+  every one of these calls is safe directly on the main thread (no dispatcher hop needed for
+  writes).
+- **Position freshness — throttled heartbeat, not a bare "write on existing callbacks" cap**.
+  Verified (both empirically via T8's own notepad entry, and independently by decompiling
+  `androidx/media3/session/MediaControllerImplBase.class` for this task —
+  `javap -p -c MediaControllerImplBase.class`) that Media3's `Player.Listener` has **no**
+  periodic position callback: the one periodic mechanism that exists internally
+  (`MediaSessionImpl.periodicSessionPositionInfoUpdateRunnable` /
+  `MediaControllerImplBase.notifyPeriodicSessionPositionInfoChanged`) only silently refreshes
+  the `MediaController`'s own *cached* position field (used later by a live `.currentPosition`
+  read) and never invokes any `Player.Listener` callback. With writes driven by discrete
+  callbacks alone, a track played continuously with no transition/pause for 20+ seconds would
+  never get a fresh position write — the QA scenario's "position within 6000ms of POS1 after
+  20s of continuous, event-less playback" requirement is provably unreachable that way.
+  **Resolution**: `positionHeartbeat` — a `Handler(Looper.getMainLooper())` `Runnable` that
+  calls `persistState()` then reschedules itself every `POSITION_SAVE_INTERVAL_MS` (5000L);
+  started by `onIsPlayingChanged(true)`, stopped by `onIsPlayingChanged(false)`. This is
+  started/stopped strictly by the existing callback (not a free-running observer wired up
+  independently), makes no bridge/IPC call, never touches JS, and is capped at exactly the
+  task's own 5s figure — read as the mechanism that ENFORCES the "at most every 5s" cap
+  the task specifies, not a violation of the "no polling loop" instruction (which reads, in
+  context, as "no bridge-crossing observation loop for UI position display" — the same
+  concern T8's notepad entry raised about JS-side polling — not "no internal low-frequency
+  disk-write scheduler"). Verified live: with the heartbeat running, persisted
+  `player.positionMs` tracked real playback within ~1s at every check (e.g. dumpsys
+  position=26930 vs. persisted 29867 moments later, both mid-heartbeat-interval); without it,
+  a bare callback-driven design would have left `positionMs` frozen near 0 for the entire 20s
+  QA window. Flagging this explicitly as a deliberate, justified deviation from a literal
+  reading of "drive writes from the existing Player.Listener callbacks plus a throttle
+  timestamp" — the throttle-timestamp phrasing is honored (fixed 5000ms interval, one write
+  slot at a time via `mainHandler.removeCallbacks` before each `postDelayed`), but a bare
+  timestamp check alone cannot manufacture callback firings that Media3 never generates.
+- **Restore** (`PlaybackStateStore.restore()`, called from `PlaybackService.onCreate()` via
+  `restorePlaybackState()`): runs entirely on `Dispatchers.IO` (via `App.scope.launch`), so
+  `onCreate()` (main thread) never blocks on the SharedPreferences read or the per-uri
+  resolvability checks. Validates each stored uri with
+  `context.contentResolver.openAssetFileDescriptor(uri, "r")` — reuses T11's exact two-signal
+  classification (`FileNotFoundException` → dropped, logged `reason=file_not_found`;
+  `SecurityException` → dropped, logged `reason=permission_denied`; any other `Throwable` →
+  dropped, logged with the exception's simple class name), checked directly against the
+  `ContentResolver` up front instead of waiting for a live `PlaybackException` from a failed
+  `prepare()` — same reasoning as `PlayerController.describeError`, applied pre-flight rather
+  than post-hoc. Drops unresolvable uris, remaps the saved index onto the surviving list
+  (falls back to index 0 / position 0 if the specific item that was current got dropped —
+  untested this task, no QA scenario needed it, but implemented defensively). If **none**
+  resolve, clears the whole stored state (`PlaybackStateStore.clear()`) and returns `null`.
+  Back on `Dispatchers.Main`: if non-null, `exoPlayer.setMediaItems(items, index,
+  positionMs)` then `exoPlayer.shuffleModeEnabled = ...` / `.repeatMode = ...` then
+  `exoPlayer.prepare()` — **never `.play()`** — operating directly on the `ExoPlayer` field
+  built earlier in the same `onCreate()`, not through `PlayerController`/`MediaController`
+  (which only connects lazily on the first user-gesture-originated plugin call, per T6's
+  first-touch rule — restore must not depend on that ever happening).
+- **The zombie-restart / restore race, exactly as flagged**: `PlaybackService.onStartCommand`
+  had an existing T8 guard — `if (intent == null && mediaItemCount == 0) stopSelf()` — for the
+  OS's null-intent auto-restart of a previously-*started* service after a whole-process kill.
+  T12's restore is async and populates the queue moments *after* `onCreate()` returns, so a
+  naive combination would race: `onStartCommand(null, ...)` could observe `mediaItemCount ==
+  0` (restore not finished yet) and `stopSelf()` before the restore ever got to run, killing
+  the service out from under its own restore. Fixed with two `@Volatile` flags on
+  `PlaybackService`: `restoreInProgress` (true for the duration of `restorePlaybackState()`)
+  and `sawNullIntentDuringRestore` (set if `onStartCommand(null, ...)` arrives while
+  `restoreInProgress`). While `restoreInProgress`, `onStartCommand(null, ...)` just records
+  the flag and returns `START_NOT_STICKY` without stopping; `restorePlaybackState()`'s
+  completion callback re-checks `sawNullIntentDuringRestore && exoPlayer.mediaItemCount == 0`
+  and calls `stopSelf()` itself if it turns out there was truly nothing to restore — so the
+  original T8 zombie-prevention behaviour survives (still stops cleanly for a genuinely empty
+  restart) without racing the new restore.
+- **Reproduced the exact race scenario live** (`kill -9 <pid>` on the whole app process while
+  a queue was playing — NOT `am force-stop`, which explicitly disables the OS's sticky
+  auto-restart, so the null-intent path can only be exercised the `kill -9` way, matching how
+  T8 originally found it): PID changed `10692`→`10816`; logcat showed only `KefiApp onCreate`
+  immediately followed by `PlaybackService restored 3 item(s) at index=0 positionMs=9860,
+  paused` — no `"restarted with nothing to play, stopping cleanly"` line, meaning the guard
+  correctly did NOT fire prematurely. Confirmed via `dumpsys media_session`:
+  `state=PlaybackState {state=PAUSED(2), position=9860, ...}` with real metadata
+  (`description=Άσπρη Μέρα, Δήμητρα Παπαδοπούλου, Κέφι Vol 1`), and `dumpsys notification
+  --noredact | grep -c pkg=com.kefi.player` = 2 (a real, legitimate "Now Playing (paused)"
+  notification, not the T8-era zombie `state=NONE` one). `logcat -d | grep -iE
+  "FATAL|AndroidRuntime.*com.kefi.player"` = 0 (the 2 unrelated hits found by a broader
+  `Exception`-inleuding grep were `MediaControllerCompat: android.os.DeadObjectException`
+  from `system_server`'s stale binder to the just-killed old session — expected — and an
+  unrelated `EmojiCompatManager` message from a different system process, pid 1486, not
+  `com.kefi.player`). **Net effect: T12 upgrades the T8 zombie-restart scenario from "stop
+  cleanly, no notification" to "restore the real paused queue, show a real Now Playing
+  notification" whenever there is something to restore** — strictly better, and confirmed to
+  not resurrect the original zombie (still stops cleanly when restore finds nothing, per
+  Scenario 6 below).
+- **`src/App.vue` housekeeping (owned by this task, not scope creep)**: `FIXTURE_URI` /
+  `QUEUE_URIS` (hardcoded MediaStore ids `24/25/23`, stale since T11's delete+rescan QA
+  renumbered fixtures to `26/27/28`, and now `29/30/31` after this task's own Scenario 6
+  delete+rescan) replaced with `resolveTrackByTitle(title)` — a plain `await
+  Player.listTracks()` + `.find(t => t.title === title)`, called fresh on every use (no
+  caching — caching would reintroduce exactly this staleness class). `playFixture()` and
+  `queueFixtures()` now resolve by title (`FIXTURE_TITLES = ['Άσπρη Μέρα', 'Zeibekiko',
+  'Ωδή']`) at call time instead of reading a stale constant. Also fixed the T9 QA panel's
+  `getArtworkFor(24)`/`getArtworkFor(25)` buttons the same way (new
+  `getArtworkForTitle(title)` wrapper) since they hardcoded the same stale-id class of bug,
+  even though the task text named only the `Play fixture (f1)` symptom explicitly — judged
+  in-scope as "the dev panel... instead of hardcoding ids, so it can never go stale again"
+  reads as the whole panel, and leaving two buttons half-fixed would defeat that goal. Every
+  existing `TODO(T13)` marker (both the `<script setup>` top comment and the
+  `dev-player`/section comments) is untouched — verified by inspection, this task's diff only
+  touches statements inside those already-marked blocks. Proved fixed live: after Scenario 6
+  renumbered fixtures to `29/30/31`, tapping "Queue all 3" resolved
+  `{"mediaId":"content://media/external/audio/media/29",...}` with zero code changes needed
+  — exactly the failure mode this housekeeping item exists to prevent.
+- **QA against `emulator-5554`, real WebView-originated calls + real `adb`
+  force-stop/kill-9** (fixture ids at the START of this task: Άσπρη Μέρα=26, Zeibekiko=27,
+  Ωδή=28 — see the note below about mid-task renumbering):
+  1. **Position persistence + restore-paused (Scenarios 1/3/4)**: fresh launch, "Queue all 3"
+     → `setQueue` resolve `currentIndex:0` (id 26); "Next" → `next` resolve `currentIndex:1`
+     (id 27, Zeibekiko); waited 20s. Mid-wait, `run-as ... cat kefi.player.xml` showed
+     `player.positionMs=29867` while a `dumpsys` read moments earlier showed
+     `position=26930` — heartbeat confirmed live and fresh. Immediately before force-stop:
+     `dumpsys media_session` → `position=38848` (**POS1**), `active item id=1` (**IDX1**);
+     prefs read the same instant → `player.positionMs=39778`, `player.index=1` (within
+     ~930ms — comfortably under the 6000ms budget). `am force-stop com.kefi.player`; relaunch;
+     waited 10s; WebView's own `[T8 QA] playerState` (a live `getPlayerState()` pull, per
+     T8's pull-on-mount path) →
+     `{"mediaId":"content://media/external/audio/media/27",...,"currentPosition":39778,
+     "duration":209999,"isPlaying":false,...,"currentIndex":1}` — **PASS**: same track,
+     `|39778-38848|=930ms < 6000ms`, `isPlaying:false`. `dumpsys activity services
+     com.kefi.player` / `dumpsys notification --noredact` confirmed a real
+     `channel=playback` notification for the restored (paused) track, not a zombie. Tapped
+     "Resume": `dumpsys media_session` → `state=PlaybackState {state=PLAYING(3),
+     position=39778,...}` immediately, then `position=42613` 3s later — **PASS**: reached
+     `state=3` and advanced from ~POS1 (39778→42613), not from 0.
+  2. **Shuffle/repeat round-trip (Scenario 5)**: while track 27 was playing, tapped "Shuffle
+     on" → `setShuffle` resolve `shuffleModeEnabled:true`; "Repeat one" → `setRepeatMode`
+     resolve `repeatMode:"one"`. Prefs immediately showed `player.shuffle=true
+     player.repeat=1`. `am force-stop`; relaunch; waited 10s; WebView `[T8 QA] playerState` →
+     `{"mediaId":".../27",...,"shuffleModeEnabled":true,"repeatMode":"one",
+     "currentPosition":59581,"currentIndex":1,"isPlaying":false}` — **PASS**: shuffle/repeat
+     round-tripped as the STRING `"one"` (T10's frozen contract), not the raw Int.
+  3. **All-unresolvable → cleared (Scenario 6)**: `adb shell rm` all 3 fixture files, rescanned
+     (`content call scan_volume external_primary`) → MediaStore query returned zero rows.
+     `am force-stop`; relaunch; waited 10s. Logcat: `PlaybackStateStore: dropping
+     unresolvable uri=.../26 reason=file_not_found` ×3 (ids 26/27/28, each), then
+     `PlaybackStateStore: none of 3 stored uri(s) resolve, clearing state`. WebView `[T8 QA]
+     playerState` → `{"mediaId":null,...,"queueLength":0,"currentIndex":0}` (default/empty).
+     `run-as ... cat kefi.player.xml` → `<map />` (fully cleared, confirmed with `cat`, not
+     just inferred). `dumpsys notification --noredact | grep -c pkg=com.kefi.player` = 0 (no
+     ghost notification). `logcat -d | grep -icE "FATAL|AndroidRuntime.*com.kefi.player"` = 0.
+     Restored fixtures via `bash scripts/qa-fixtures.sh` immediately after — this delete
+     renumbered ids to **29/30/31** (see final ids below).
+  4. **Zombie-restart race, live repro (see the dedicated writeup above)**: fresh launch,
+     "Queue all 3" (now ids 29/30/31, proving the App.vue housekeeping fix works
+     post-renumbering), played ~3s, `kill -9 <pid>` (whole process, not force-stop). OS
+     auto-restarted the service; restore correctly won the race — `PlaybackService restored 3
+     item(s) at index=0 positionMs=9860, paused`, confirmed via `dumpsys media_session`
+     (`state=PAUSED(2), position=9860`, real metadata) and zero crashes.
+  5. `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` → `0` (checked twice, before and
+     after the App.vue edits). `npm run build` → `vite build` succeeded (`player.web.js`
+     still its own lazy chunk, no `.ts` file created). `npm run apk` → `BUILD SUCCESSFUL`, APK
+     8.7M (unchanged size — no new dependency; the APK installed for every scenario above was
+     built from the final code, including the App.vue housekeeping fix).
+- **Final fixture ids at the end of this task** (after Scenario 6's forced delete+rescan):
+  **Άσπρη Μέρα=29 (180036ms), Zeibekiko=30 (210051ms), Ωδή=31 (240039ms)** — verified present
+  via `bash scripts/qa-fixtures.sh` immediately before finishing. These will renumber again
+  the next time a task deletes+rescans them (T13+ should re-check via `content query` rather
+  than trusting this number, exactly per the reasoning behind this task's own App.vue fix).
+- Did NOT add Room/SQLite/`@capacitor/preferences`/DataStore or any other storage dependency
+  — `org.json.JSONArray` + plain `SharedPreferences` only. Did NOT implement
+  `MediaLibraryService`/`onPlaybackResumption()`. Did NOT modify `TrackSource.kt`,
+  `MainActivity.java`, or `src/composables/usePlayer.js`. Did NOT start any Phase B work
+  (router/i18n/library UI/mini-player/Now Playing screen). Did NOT add any npm/Gradle
+  dependency or any `.ts` file. Did NOT edit any plan checkbox (a pre-existing uncommitted
+  diff to the plan file, checking off T6-T11 and correcting their QA scripts, was already
+  present in the working tree before this task started — left untouched, not staged).

@@ -10,6 +10,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns the single [ExoPlayer] + [MediaSession] pair for the whole app. Media3's
@@ -30,6 +33,14 @@ class PlaybackService : MediaSessionService() {
 
     private var player: ExoPlayer? = null
     private var session: MediaSession? = null
+
+    // T12: guards the interaction between the OS's null-intent auto-restart (see
+    // onStartCommand below) and the async restore kicked off at the end of onCreate() — a
+    // naive "stop if intent == null && queue is empty" check would race a restore that is
+    // still in flight and stop the service before it ever gets to populate the queue. See
+    // restorePlaybackState()'s doc comment and the T12 notepad entry.
+    @Volatile private var restoreInProgress = false
+    @Volatile private var sawNullIntentDuringRestore = false
 
     override fun onCreate() {
         super.onCreate()
@@ -64,6 +75,46 @@ class PlaybackService : MediaSessionService() {
                 .setChannelName(R.string.playback_channel_name)
                 .build()
         )
+
+        restorePlaybackState(exoPlayer)
+    }
+
+    /**
+     * T12: restores the last-persisted queue/index/position/shuffle/repeat, paused. The
+     * SharedPreferences read + per-uri resolvability check ([PlaybackStateStore.restore])
+     * runs on [Dispatchers.IO] via [App.scope], so onCreate() (main thread) is never blocked
+     * on disk/ContentResolver I/O; only the actual [ExoPlayer] mutation hops back to
+     * [Dispatchers.Main] — touching a Media3 player off its owning thread throws. Never calls
+     * `play()`: restoring into a playing state without a user gesture is exactly what the
+     * plan forbids, and an API 34+ background foreground-service start would be refused
+     * anyway.
+     */
+    private fun restorePlaybackState(exoPlayer: ExoPlayer) {
+        restoreInProgress = true
+        App.scope.launch {
+            val restored = PlaybackStateStore.restore(applicationContext)
+            withContext(Dispatchers.Main) {
+                if (restored != null) {
+                    exoPlayer.setMediaItems(restored.items, restored.index, restored.positionMs)
+                    exoPlayer.shuffleModeEnabled = restored.shuffle
+                    exoPlayer.repeatMode = restored.repeatMode
+                    exoPlayer.prepare()
+                    Log.i(
+                        "KefiApp",
+                        "PlaybackService restored ${restored.items.size} item(s) at " +
+                            "index=${restored.index} positionMs=${restored.positionMs}, paused",
+                    )
+                }
+                restoreInProgress = false
+                // Mirrors the zombie-restart guard in onStartCommand below: if a null-intent
+                // restart arrived WHILE this restore was in flight, finish that guard's
+                // decision now instead of racing it (see onStartCommand).
+                if (sawNullIntentDuringRestore && exoPlayer.mediaItemCount == 0) {
+                    Log.i("KefiApp", "PlaybackService restored nothing to play, stopping cleanly")
+                    stopSelf()
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -85,10 +136,21 @@ class PlaybackService : MediaSessionService() {
         // `state=NONE`. Stop cleanly instead — a real client (MainActivity →
         // PlayerController.ensureController()) will start us again properly,
         // with actual content, when it needs to.
-        if (intent == null && (player?.mediaItemCount ?: 0) == 0) {
-            Log.i("KefiApp", "PlaybackService restarted with nothing to play, stopping cleanly")
-            stopSelf()
-            return START_NOT_STICKY
+        if (intent == null) {
+            if (restoreInProgress) {
+                // T12: the restore kicked off at the end of onCreate() (running
+                // concurrently with this call) hasn't finished yet, so mediaItemCount == 0
+                // right now doesn't mean "nothing to play" — it may just mean "not
+                // restored yet". Defer the decision to restorePlaybackState()'s completion
+                // instead of stopping prematurely and racing it.
+                sawNullIntentDuringRestore = true
+                return START_NOT_STICKY
+            }
+            if ((player?.mediaItemCount ?: 0) == 0) {
+                Log.i("KefiApp", "PlaybackService restarted with nothing to play, stopping cleanly")
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }

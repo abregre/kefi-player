@@ -1,6 +1,8 @@
 package com.kefi.player
 
 import android.content.ComponentName
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
@@ -96,16 +98,86 @@ object PlayerController {
     @Volatile
     private var consecutiveErrorCount = 0
 
+    /**
+     * T12: throttled position-persistence heartbeat. Media3's `Player.Listener` never fires
+     * on a bare position tick (confirmed empirically in T8 — see the notepad's T8 entry, and
+     * confirmed again by decompiling `MediaControllerImplBase` for T12: the periodic
+     * position refresh Media3 already runs internally, `notifyPeriodicSessionPositionInfoChanged`,
+     * only updates the controller's own cached position silently and never invokes
+     * `Player.Listener`), so with zero periodic component the persisted position would only
+     * ever be as fresh as the last discrete transition — stale by however long a track has
+     * been playing uninterrupted. [startPositionHeartbeat]/[stopPositionHeartbeat] are
+     * started/stopped directly from [onIsPlayingChanged] below (an existing callback, not a
+     * new observer), and [POSITION_SAVE_INTERVAL_MS] is the same 5s figure the task caps
+     * position-write frequency at — this is that cap, not an additional unbounded loop.
+     */
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val positionHeartbeat = object : Runnable {
+        override fun run() {
+            persistState()
+            mainHandler.postDelayed(this, POSITION_SAVE_INTERVAL_MS)
+        }
+    }
+
+    private fun startPositionHeartbeat() {
+        mainHandler.removeCallbacks(positionHeartbeat)
+        mainHandler.postDelayed(positionHeartbeat, POSITION_SAVE_INTERVAL_MS)
+    }
+
+    private fun stopPositionHeartbeat() {
+        mainHandler.removeCallbacks(positionHeartbeat)
+    }
+
+    /**
+     * T12: writes queue/index/position/shuffle/repeat to [PlaybackStateStore]. Called from
+     * every [listener] branch that already calls [broadcastState] (so persisted state never
+     * lags the JS-facing snapshot) plus [positionHeartbeat] above. A no-op before any queue
+     * exists (nothing to persist yet). `SharedPreferences.Editor.apply()` commits
+     * asynchronously, so this is safe to call directly on the main thread.
+     */
+    private fun persistState() {
+        val ctrl = controller ?: return
+        val uris = (0 until ctrl.mediaItemCount).mapNotNull {
+            ctrl.getMediaItemAt(it).localConfiguration?.uri?.toString()
+        }
+        if (uris.isEmpty()) return
+        PlaybackStateStore.save(
+            context = App.instance,
+            uris = uris,
+            index = ctrl.currentMediaItemIndex,
+            positionMs = ctrl.currentPosition,
+            shuffle = ctrl.shuffleModeEnabled,
+            repeatMode = ctrl.repeatMode,
+        )
+    }
+
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) consecutiveErrorCount = 0
+            if (isPlaying) startPositionHeartbeat() else stopPositionHeartbeat()
+            persistState()
             broadcastState()
         }
 
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = broadcastState()
-        override fun onPlaybackStateChanged(playbackState: Int) = broadcastState()
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = broadcastState()
-        override fun onRepeatModeChanged(repeatMode: Int) = broadcastState()
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            persistState()
+            broadcastState()
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            persistState()
+            broadcastState()
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            persistState()
+            broadcastState()
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            persistState()
+            broadcastState()
+        }
 
         override fun onPlayerError(error: PlaybackException) {
             val ctrl = controller ?: return
@@ -135,9 +207,13 @@ object PlayerController {
             }
 
             onTrackUnavailable?.invoke(failedUri, reason)
+            persistState()
             broadcastState()
         }
     }
+
+    /** T12: position-persistence heartbeat cap (see [positionHeartbeat] above). */
+    private const val POSITION_SAVE_INTERVAL_MS = 5_000L
 
     /**
      * Media3 surfaces file-availability failures as a [PlaybackException] with a stable
