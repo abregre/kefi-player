@@ -1,6 +1,7 @@
 package com.kefi.player
 
 import android.content.ComponentName
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -13,6 +14,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.FileNotFoundException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -72,18 +74,83 @@ object PlayerController {
      */
     var onState: ((Snapshot) -> Unit)? = null
 
+    /**
+     * Set by [PlayerPlugin][com.kefi.player] (T11) to receive skip-on-error notifications;
+     * invoked on [Dispatchers.Main] from [onPlayerError] below, once per failed item, with the
+     * failing item's `uri` (nullable — the item may have no `localConfiguration` in edge
+     * cases) and a short `reason` code. T7 forwards each call straight to Capacitor's
+     * `notifyListeners("trackUnavailable", ...)`. This is intentionally separate from
+     * [onState]/[Snapshot] — the frozen 11-key snapshot contract is not touched by this event.
+     */
+    var onTrackUnavailable: ((uri: String?, reason: String) -> Unit)? = null
+
+    /**
+     * Bounds the skip-on-error loop (T11): incremented on every [onPlayerError], reset to 0
+     * the moment playback actually starts again ([onIsPlayingChanged] fires `true`). Guards
+     * against an all-broken queue looping forever — this would otherwise be a real risk under
+     * `Player.REPEAT_MODE_ALL`, where [MediaController.hasNextMediaItem] keeps reporting
+     * `true` by wrapping back to index 0 forever. Once this count reaches the queue length
+     * (every item has now failed once since the last success), the controller stops instead
+     * of attempting yet another skip.
+     */
+    @Volatile
+    private var consecutiveErrorCount = 0
+
     private val listener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) = broadcastState()
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (isPlaying) consecutiveErrorCount = 0
+            broadcastState()
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = broadcastState()
         override fun onPlaybackStateChanged(playbackState: Int) = broadcastState()
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = broadcastState()
         override fun onRepeatModeChanged(repeatMode: Int) = broadcastState()
 
         override fun onPlayerError(error: PlaybackException) {
-            // TODO(T11): skip-on-error logic (advance past the failing item). For now just
-            // re-broadcast so observers see the resulting playback-state change.
+            val ctrl = controller ?: return
+            val failedUri = ctrl.currentMediaItem?.localConfiguration?.uri?.toString()
+            val reason = describeError(error)
+            Log.w(
+                "KefiApp",
+                "Track unavailable: uri=$failedUri reason=$reason errorCode=${error.errorCode} " +
+                    "errorCodeName=${error.errorCodeName} cause=${error.cause}",
+            )
+
+            consecutiveErrorCount++
+            if (consecutiveErrorCount < ctrl.mediaItemCount && ctrl.hasNextMediaItem()) {
+                // Skip past the failing item and try the next one. The player is in
+                // STATE_IDLE after an error, so seeking alone does not resume loading —
+                // prepare()+play() are required to actually attempt the next item.
+                ctrl.seekToNextMediaItem()
+                ctrl.prepare()
+                ctrl.play()
+            } else {
+                // Either there is no next item, or every item in the queue has now failed
+                // once since the last successful play (bounded by mediaItemCount) — stop
+                // instead of looping forever (relevant under REPEAT_MODE_ALL, where
+                // hasNextMediaItem() would otherwise keep wrapping around indefinitely).
+                consecutiveErrorCount = 0
+                ctrl.stop()
+            }
+
+            onTrackUnavailable?.invoke(failedUri, reason)
             broadcastState()
         }
+    }
+
+    /**
+     * Media3 surfaces file-availability failures as a [PlaybackException] with a stable
+     * public [PlaybackException.errorCode]; that is checked first. [Throwable.cause] is
+     * inspected as a fallback in case a future Media3 version (or a different `DataSource`)
+     * throws the raw exception without setting a matching `errorCode`.
+     */
+    private fun describeError(error: PlaybackException): String = when {
+        error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+            error.cause is FileNotFoundException -> "file_not_found"
+        error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
+            error.cause is SecurityException -> "permission_denied"
+        else -> error.errorCodeName
     }
 
     private fun broadcastState() {

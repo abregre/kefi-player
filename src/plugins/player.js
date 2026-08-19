@@ -35,6 +35,13 @@ import { registerPlugin } from '@capacitor/core'
  */
 
 /**
+ * @typedef {Object} PlayerTrackUnavailable
+ * @property {string | null} uri The failing queue item's uri (mirrors `PlayerSnapshot.uri`).
+ * @property {string} reason Short code describing what failed, e.g. `'file_not_found'` |
+ *   `'permission_denied'` (Media3's own `PlaybackException.errorCodeName` for anything else).
+ */
+
+/**
  * @typedef {Object} PlayerPlugin
  * @property {() => Promise<PlayerSnapshot>} getPlayerState
  *   Always a live read off the native controller — never a cached value.
@@ -62,6 +69,11 @@ import { registerPlugin } from '@capacitor/core'
  * @property {() => Promise<PlayerPermissionResult>} requestAudioPermission
  *   Prompts the user if not already granted, then resolves with the resulting state.
  * @property {(eventName: 'playerState', listener: (event: PlayerSnapshot) => void) => Promise<import('@capacitor/core').PluginListenerHandle>} addListener
+ *   Also fires for `eventName: 'trackUnavailable'` with a {@link PlayerTrackUnavailable}
+ *   payload: emitted whenever the native controller fails to play a queue item (deleted/
+ *   permission-revoked file) and automatically skips ahead to the next item — the queue
+ *   never stalls silently. Separate from `playerState`; a `playerState` update for the
+ *   now-current item still follows immediately after.
  */
 
 /** @type {PlayerPlugin} */

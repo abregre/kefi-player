@@ -22,7 +22,9 @@ import org.json.JSONObject
  * live state + transport (playTrack/pause/resume/seek). T9 added device-wide audio listing
  * and artwork lookup, gated behind the `audio` (API 33+) / `audioLegacy` (API < 33)
  * permission aliases. T10 adds queueing, next/previous, shuffle, and repeat, and fixes the
- * `seek` argument-coercion bug T9 found but deliberately left out of its own scope.
+ * `seek` argument-coercion bug T9 found but deliberately left out of its own scope. T11 adds
+ * the `trackUnavailable` push event, forwarding [PlayerController.onTrackUnavailable] the same
+ * way [PlayerController.onState] is forwarded as `playerState`.
  */
 @CapacitorPlugin(
     name = "Player",
@@ -34,16 +36,26 @@ import org.json.JSONObject
 class PlayerPlugin : Plugin() {
 
     override fun load() {
-        // Only set the push callback here. PlayerController must be first connected from
+        // Only set the push callbacks here. PlayerController must be first connected from
         // a user-gesture-originated plugin call (see its header comment) — never from
         // load(), which can run before any user interaction.
         PlayerController.onState = { snapshot ->
             notifyListeners("playerState", snapshot.toJSObject())
         }
+        PlayerController.onTrackUnavailable = { uri, reason ->
+            notifyListeners(
+                "trackUnavailable",
+                JSObject().apply {
+                    put("uri", uri ?: JSONObject.NULL)
+                    put("reason", reason)
+                },
+            )
+        }
     }
 
     override fun handleOnDestroy() {
         PlayerController.onState = null
+        PlayerController.onTrackUnavailable = null
     }
 
     @PluginMethod

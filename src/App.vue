@@ -52,6 +52,12 @@ watch(snapshot, (value) => {
   console.log('[T8 QA] playerState', JSON.stringify(value))
 })
 
+// T11 QA: makes the trackUnavailable event visible in `adb logcat` (Capacitor/Console),
+// same precedent as the [T8 QA]/[T9 QA]/[T10 QA] logs above.
+watch(player.lastError, (value) => {
+  if (value) console.log('[T11 QA] trackUnavailable', JSON.stringify(value))
+})
+
 onMounted(() => {
   player.initialize()
 })
@@ -151,6 +157,8 @@ async function seekTo(positionMs) {
         <button type="button" @click="player.refreshState">Refresh state</button>
       </div>
       <pre class="dev-player-state">{{ JSON.stringify(snapshot) }}</pre>
+      <!-- T11 QA: surfaces the most recent trackUnavailable event, if any. -->
+      <pre class="dev-player-state">{{ JSON.stringify(player.lastError.value) }}</pre>
     </section>
 
     <!-- TODO(T13): T10-only QA panel for queue/next/previous/shuffle/repeat/seek -->

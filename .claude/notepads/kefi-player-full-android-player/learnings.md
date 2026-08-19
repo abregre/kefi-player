@@ -747,3 +747,133 @@ smooth bar with zero extra IPC.
   `src/composables/usePlayer.js`, or any plan checkbox. Did NOT implement `trackUnavailable`
   skip-on-error (T11) or persistence (T12). Did NOT add a polling loop, npm/Gradle
   dependency, or any `.ts` file.
+
+## T11 — Unavailable-track degradation (2026-08-20)
+- **`PlayerController.kt`**: `onPlayerError(error: PlaybackException)` now: reads
+  `ctrl.currentMediaItem?.localConfiguration?.uri?.toString()` (the failing item's uri — the
+  player is still parked on the failed item at this point, it does not auto-advance),
+  classifies the failure via a new `describeError()`, `Log.w("KefiApp", "Track unavailable:
+  uri=$failedUri reason=$reason errorCode=... errorCodeName=... cause=...")`, then skips
+  (`seekToNextMediaItem()` + `prepare()` + `play()`) or stops (`ctrl.stop()`), then invokes the
+  new `var onTrackUnavailable: ((uri: String?, reason: String) -> Unit)?` (mirrors `onState`
+  exactly — settable property, null by default, invoked on `Dispatchers.Main` since
+  `Player.Listener` callbacks already run there), then `broadcastState()` as before so
+  `playerState` still reflects the resulting transition.
+- **Exact signal that fired on device**: `errorCode=2005 errorCodeName=ERROR_CODE_IO_FILE_NOT_FOUND`,
+  `cause=androidx.media3.datasource.ContentDataSource$ContentDataSourceException:
+  java.io.FileNotFoundException: java.io.FileNotFoundException: No item at
+  content://media/external/audio/media/<id>` — for a MediaStore row that no longer exists
+  (file deleted + rescanned), Media3's `ContentDataSource` throws a
+  `ContentDataSourceException` *wrapping* a `FileNotFoundException`, and Media3 itself already
+  classifies it with the stable public `errorCode` (`ERROR_CODE_IO_FILE_NOT_FOUND`) — exactly
+  the "prefer errorCode, fall back to cause" signal the task called for; on this device the
+  `errorCode` branch fired first, the `cause is FileNotFoundException` fallback branch in
+  `describeError()` was never actually exercised (kept anyway per the task's explicit
+  requirement — a different Media3 `DataSource` implementation, e.g. a raw
+  `java.io.File`-backed one, could plausibly throw the bare exception without setting a
+  matching `errorCode`). `ERROR_CODE_IO_NO_PERMISSION`/`SecurityException` (the
+  permission-revoked case) was not separately reproduced this task — no QA scenario needed it
+  — but is handled by the same two-signal pattern.
+- **Loop-guard, verified empirically, not just by inspection**: `consecutiveErrorCount`
+  (`@Volatile private var`, module-level on `PlayerController`) increments on every
+  `onPlayerError`, resets to `0` the moment `onIsPlayingChanged(true)` fires (real successful
+  playback resumed). Skip is only attempted while
+  `consecutiveErrorCount < ctrl.mediaItemCount && ctrl.hasNextMediaItem()`; otherwise
+  `ctrl.stop()` and reset the counter. This bounds total skip attempts to the queue length
+  regardless of repeat mode — plain `hasNextMediaItem()` alone would NOT have been a safe
+  bound, because under `Player.REPEAT_MODE_ALL` it keeps returning `true` forever (wraps back
+  to index 0), which would otherwise skip-loop an all-broken queue indefinitely. **Reproduced
+  the exact failure mode on device**: after also deleting f2/f3 (all 3 fixtures gone) and
+  re-tapping "Queue all 3" (`queueLength=3`), logcat showed **exactly 3** `KefiApp: Track
+  unavailable` / `[T11 QA] trackUnavailable` lines (ids 24, 25, 23 in order), then the
+  controller stopped — `dumpsys media_session` afterward showed
+  `state=PlaybackState {state=ERROR(7), position=0, ..., error=Source error}` (no further
+  attempts, no crash, `logcat -d | grep -icE "FATAL|uncaught"` = `0`). Confirms the bound is
+  exactly `queueLength`, not unbounded.
+- **Event payload shape** (`trackUnavailable`, separate from the frozen 11-key `playerState`
+  snapshot — not folded into it): `{ uri: string | null, reason: string }`. `reason` values
+  produced by `describeError()`: `"file_not_found"` (errorCode `ERROR_CODE_IO_FILE_NOT_FOUND`
+  or `cause is FileNotFoundException`), `"permission_denied"` (errorCode
+  `ERROR_CODE_IO_NO_PERMISSION` or `cause is SecurityException`), else Media3's own
+  `error.errorCodeName` string (e.g. `"ERROR_CODE_DECODER_INIT_FAILED"`) as a generic
+  fallback so no failure is ever silently swallowed into an opaque "unknown".
+- **`PlayerPlugin.kt`**: `load()` now also sets
+  `PlayerController.onTrackUnavailable = { uri, reason -> notifyListeners("trackUnavailable",
+  JSObject().apply { put("uri", uri ?: JSONObject.NULL); put("reason", reason) }) }`;
+  `handleOnDestroy()` also clears it to `null` — exact mirror of the existing `onState`
+  set/clear pair.
+- **JS side**: `src/plugins/player.js`'s `addListener` JSDoc now documents `trackUnavailable`
+  (fires with `{ uri, reason }`, queue already skipped ahead by the time it fires, a
+  `playerState` update for the new current item follows immediately after — confirmed in the
+  QA logcat above: the `[T11 QA] trackUnavailable` line for id 24 is immediately followed by a
+  `[T8 QA] playerState` line with `currentIndex:1` / `mediaId:.../25`). `src/plugins/player.web.js`
+  gained a dev-only `simulateTrackUnavailable({ uri, reason })` method (not part of the native
+  contract — the browser stub has no real file-system/Media3 error path to trigger this
+  organically) that just calls `this.notifyListeners('trackUnavailable', { uri, reason })`, for
+  manually exercising the UI path under `npm run dev`.
+- **`src/composables/usePlayer.js`**: added `const lastError = ref(null)` (module-level, same
+  shared-instance pattern as the other refs) holding `{ uri, reason } | null`, exposed as
+  `lastError: readonly(lastError)`. `attachListeners()` now also does
+  `await Player.addListener('trackUnavailable', ({ uri, reason }) => { lastError.value = {
+  uri, reason } })` right after the existing `playerState` listener, inside the same
+  already-attached-once `listenersReady` guard (no new guard needed — one `attachListeners()`
+  call now wires both events atomically). This composable does not otherwise act on the drop
+  (no retry/removal from a persisted list — that is T12/T19's job); it only records the most
+  recent failure for the UI to read.
+- **`src/App.vue`** (still under the `TODO(T13)` marker): added a
+  `watch(player.lastError, ...) -> console.log('[T11 QA] trackUnavailable', ...)` right after
+  the existing `[T8 QA]` watch, and a second `<pre>` under the existing snapshot read-out
+  showing `JSON.stringify(player.lastError.value)` — purely for QA visibility, no new button
+  needed (the existing T10 "Queue all 3 (start Άσπρη Μέρα)" button already queues f1+f2(+f3)
+  starting at f1, which is exactly the T11 QA scenario's setup).
+- **QA against `emulator-5554`, real WebView-originated calls** (fixture ids before this task,
+  same as T10: Ωδή=23, Άσπρη Μέρα=24, Zeibekiko=25):
+  1. Tapped "Queue all 3" (f1, f2, f3 queued, starts Άσπρη Μέρα/24) — confirmed playing via
+     `dumpsys media_session` `state=PLAYING(3)`.
+  2. `adb shell rm /sdcard/Music/kefi-qa/f1.mp3` then
+     `adb shell content call --uri content://media --method scan_file --arg
+     /sdcard/Music/kefi-qa/f1.mp3` — `content query ... --where "is_music=1"` afterward shows
+     only `_id=23` (Ωδή) and `_id=25` (Zeibekiko) rows; the `_id=24` row is gone entirely (not
+     just flagged), confirming the rescan actually removed it from MediaStore.
+  3. Re-tapped "Queue all 3" (restarts playback of the queue, per the QA scenario's literal
+     instruction) — real captured logcat, tap-to-event latency **~5-27ms** (`08-20
+     01:15:48.136` `setQueue` call → `08-20 01:15:48.147` `KefiApp: Track unavailable` →
+     `08-20 01:15:48.151` `[T11 QA] trackUnavailable`), far inside the 10s budget:
+     `08-20 01:15:48.147 W KefiApp : Track unavailable: uri=content://media/external/audio/media/24
+     reason=file_not_found errorCode=2005 errorCodeName=ERROR_CODE_IO_FILE_NOT_FOUND
+     cause=androidx.media3.datasource.ContentDataSource$ContentDataSourceException:
+     java.io.FileNotFoundException: java.io.FileNotFoundException: No item at
+     content://media/external/audio/media/24`
+     `08-20 01:15:48.151 I Capacitor/Console: ... [T11 QA] trackUnavailable
+     {"uri":"content://media/external/audio/media/24","reason":"file_not_found"}`
+     `08-20 01:15:48.151 I Capacitor/Console: ... [T8 QA] playerState
+     {"mediaId":"content://media/external/audio/media/25",...,"currentIndex":1}`.
+  4. `dumpsys media_session` immediately after:
+     `state=PlaybackState {state=PLAYING(3), position=8915, ...}` /
+     `metadata: size=5, description=Zeibekiko, Nikos Alexiou, Kefi Vol 1` — **PASS**.
+  5. `adb -s emulator-5554 logcat -d | grep -icE "FATAL|uncaught"` → `0`.
+  6. **Loop-guard scenario** (also deleted f2.mp3/f3.mp3, rescanned both — all 3 fixtures now
+     gone from MediaStore — then re-tapped "Queue all 3" once more): logcat showed **exactly 3**
+     `KefiApp: Track unavailable` / `[T11 QA] trackUnavailable` lines, for ids 24, 25, 23 in
+     that order (queue order), then no further attempts; `dumpsys media_session` →
+     `state=PlaybackState {state=ERROR(7), position=0, ..., error=Source error}`;
+     `logcat -d | grep -icE "FATAL|uncaught"` → `0`. Confirms the `consecutiveErrorCount <
+     mediaItemCount` bound stopped the skip loop after exactly `queueLength` (3) attempts, not
+     before and not indefinitely.
+- **Fixtures restored**: `bash scripts/qa-fixtures.sh emulator-5554` re-run at the end (after
+  the loop-guard scenario deleted all 3 files) — `content call --uri content://media --method
+  scan_file` (per-file) was again the scan method that worked first, output: `OK: 3 fixtures
+  indexed correctly` with all 3 rows present, correct titles/artists/albums/durations. **New
+  MediaStore ids after this task's delete+rescan cycles (they DID renumber, unlike T2's
+  in-place-overwrite case, because the rows were actually deleted this time, not just
+  content-replaced at the same path)**: `content query --uri
+  content://media/external/audio/media --projection _id:title:duration --where "is_music=1"`
+  →  `_id=26` Άσπρη Μέρα (180036ms), `_id=27` Zeibekiko (210051ms), `_id=28` Ωδή (240039ms).
+  **T12 and every later task must use these new ids
+  (`content://media/external/audio/media/26|27|28`), not the old 23/24/25.**
+- Verified: `./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` = `0`. `npm run build`
+  succeeds (`player.web.js` still its own lazy chunk, no `.ts` file created). `npm run apk` →
+  `BUILD SUCCESSFUL`, APK 8.7M (unchanged — no new dependency).
+- Did NOT touch `PlaybackService.kt`, `MainActivity.java`, `TrackSource.kt`, or any plan
+  checkbox. Did NOT implement persistence (T12), library UI, or any Phase B work. Did NOT add
+  a polling loop, npm/Gradle dependency, or any `.ts` file.

@@ -109,6 +109,16 @@ export class PlayerWeb extends WebPlugin {
     return { ...this.state }
   }
 
+  /**
+   * Dev-only helper, not part of the native `PlayerPlugin` contract: lets `npm run dev`
+   * (no real Media3/file-system errors available in a browser) exercise the `trackUnavailable`
+   * path the same way a real deleted/permission-revoked file does on device (T11).
+   * @param {{ uri: string | null, reason: string }} options
+   */
+  async simulateTrackUnavailable({ uri, reason }) {
+    this.notifyListeners('trackUnavailable', { uri, reason })
+  }
+
   jumpToIndex(index, extra = {}) {
     if (this.queue.length === 0) return
     const clamped = Math.max(0, Math.min(index, this.queue.length - 1))

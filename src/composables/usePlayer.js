@@ -22,6 +22,14 @@ const queueLength = ref(0)
 const currentIndex = ref(0)
 /** Message from the most recent failed getPlayerState/action call, if any. */
 const stateError = ref('')
+/**
+ * Most recent `trackUnavailable` event, if any (T11) — `{ uri, reason }` or `null`. The
+ * native controller has already skipped past the failing item and moved on by the time
+ * this fires; this is surfaced state for the UI T19 will build (e.g. a toast/snackbar),
+ * not something this composable acts on beyond recording it.
+ * @type {import('vue').Ref<{ uri: string | null, reason: string } | null>}
+ */
+const lastError = ref(null)
 
 let listenersReady = false
 let visibilityHandlerReady = false
@@ -68,6 +76,9 @@ async function attachListeners() {
 
   await Player.addListener('playerState', (snapshot) => {
     applySnapshot(snapshot)
+  })
+  await Player.addListener('trackUnavailable', ({ uri, reason }) => {
+    lastError.value = { uri, reason }
   })
 }
 
@@ -165,6 +176,7 @@ export function usePlayer() {
     queueLength: readonly(queueLength),
     currentIndex: readonly(currentIndex),
     stateError: readonly(stateError),
+    lastError: readonly(lastError),
     initialize,
     refreshState,
     playTrack,
