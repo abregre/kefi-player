@@ -74,6 +74,58 @@
 - `unzip -l app-debug.apk | grep -c 'lib/'` = 0 — confirmed Media3 pulled in no native libraries.
 - `npm run apk 2>&1 | grep -c "BUILD SUCCESSFUL"` = 1.
 
+## T5 — PlaybackService (MediaSessionService) + manifest (2026-08-19)
+- f1.mp3 ("Άσπρη Μέρα") content URI resolved with the colon-projection form:
+  `adb -s emulator-5554 shell content query --uri content://media/external/audio/media --projection _id:title --where "\"title='Άσπρη Μέρα'\""`
+  → `_id=24` → hardcoded URI `content://media/external/audio/media/24`. Note the
+  extra outer `\"...\"` quoting around the whole `--where` value: without it the adb
+  shell tokenizer drops the SQL string's single quotes and `content query` throws
+  `SQLiteException: near "Μέρα": syntax error`.
+- **Critical Media3 gotcha not spelled out in the task text**: building
+  `MediaSession.Builder(this, player).build()` and returning it from `onGetSession`
+  is NOT enough by itself. `MediaSessionService` only wires a session into its
+  internal notification/foreground-service manager when you explicitly call the
+  base class's public `addSession(session)` (and `removeSession(session)` in
+  `onDestroy` before releasing). Without `addSession`, the ExoPlayer genuinely
+  plays audio (confirmed via `dumpsys audio`/`dumpsys media_session`) but the
+  service NEVER calls `Service.startForeground()`, and — because we started it
+  with `adb shell am start-foreground-service` — Android kills the process ~30s
+  later with `android.app.RemoteServiceException$ForegroundServiceDidNotStartInTimeException:
+  Context.startForegroundService() did not then call Service.startForeground()`.
+  Confirmed this exact crash once, then fixed by adding `addSession(mediaSession)`
+  in `onCreate()` right after building the session, and `removeSession(it)` as the
+  first line of `onDestroy()`. Decompiled `media3-session-1.11.0-runtime.jar`
+  (`javap -p androidx/media3/session/MediaSessionService.class`) to confirm
+  `addSession`/`removeSession` are real public API on the base class.
+- Debug entry point (marked `// TODO(T7): remove`, both the `onStartCommand`
+  branch and the `ACTION_DEBUG_PLAY` constant and the hardcoded fixture URI line):
+  triggered with
+  `adb -s emulator-5554 shell am start-foreground-service -a com.kefi.player.debug.PLAY -n com.kefi.player/.PlaybackService`
+  (plain `am startservice` — without `-foreground-service` — silently did nothing;
+  ActivityManager never even reached our `onStartCommand`, no crash, no log lines
+  at all, most likely background-service-start restrictions on a non-foreground
+  caller even with shell's UID; do not use that variant for this service).
+- Notification observed: `dumpsys activity services` → `isForeground=true
+  foregroundId=1001 types=0x00000002` (`0x2` = `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`)
+  `foregroundNoti=Notification(channel=playback ... category=transport
+  groupKey=media3_group_key ...)`. `dumpsys notification --noredact` confirms
+  `channel=playback`, `id=1001`, and `extras={ android.template=String
+  (android.app.Notification$MediaStyle) }`. The foreground notification and
+  `isForeground=true` persist even after the 5s fixture finishes and playback
+  state goes to `STOPPED` — the service does not stop itself (matches
+  `MediaSessionService`'s idle-player notification default), only `onTaskRemoved`
+  (not overridden) would tear it down when the task is swiped away with nothing
+  playing.
+- `onTaskRemoved` is confirmed NOT overridden in `PlaybackService.kt` — verified
+  by reading the committed file; only `onCreate`, `onGetSession`, `onStartCommand`,
+  `onDestroy` are overridden.
+- All 5 QA dumpsys/logcat assertions passed on `emulator-5554` after the
+  `addSession` fix (see PR/commit for full pasted output): service foreground
+  with `mediaPlayback` type, `media_session` `state=PLAYING(3)`, `dumpsys audio`
+  `state:started` + `media.audio_flinger` output MIXER thread `Standby: no`,
+  `logcat` error grep = `0`, notification `channel=playback` +
+  `android.template=...MediaStyle`.
+
 ## T2 — deterministic audio fixtures + MediaStore indexing (2026-08-19)
 - Codec used: `libmp3lame` (available on this machine) — all fixtures are `.mp3`, no AAC/`.m4a` fallback needed.
 - Scan method that worked (first in the ladder, stop there): `adb -s emulator-5554 shell content call --uri content://media --method scan_file --arg /sdcard/Music/kefi-qa/<file>.mp3`, run once per file. `scan_volume` and `jobscheduler run -f com.android.providers.media.module -201` were never reached.
