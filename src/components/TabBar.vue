@@ -1,15 +1,22 @@
 <script setup>
-// Bottom tab bar. Only the two top-level destinations live here (Must Have 9);
-// Now Playing is reached from the mini-player (T17), not from a tab, so the bar
-// keeps the two-target shape a music library actually needs.
+// Bottom tab bar. Only the top-level destinations live here;
+// Now Playing is reached from the mini-player (T17), not from a tab.
+import { computed } from 'vue'
 import { useI18n } from '../i18n'
+import { unlocked } from '../composables/useEasterEgg'
 
 const { t } = useI18n()
 
-const tabs = [
-  { to: '/library', key: 'tab.library' },
-  { to: '/settings', key: 'tab.settings' },
-]
+const tabs = computed(() => {
+  const base = [
+    { to: '/library', key: 'tab.library' },
+  ]
+  if (unlocked.value) {
+    base.push({ to: '/downloader', key: 'tab.downloads' })
+  }
+  base.push({ to: '/settings', key: 'tab.settings' })
+  return base
+})
 </script>
 
 <template>
@@ -20,6 +27,13 @@ const tabs = [
           <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H8v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z" />
           <path d="M10 4h2.5A1.5 1.5 0 0 1 14 5.5v13A1.5 1.5 0 0 1 12.5 20H10V4Z" />
           <path d="m16.6 5.4 1.9 13a1.5 1.5 0 0 0 1.7 1.2l.3-.1-2.2-14.6-1.7.5Z" />
+        </svg>
+      </span>
+      <span v-else-if="tab.to === '/downloader'" class="glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+          <path d="M12 3v11" />
+          <path d="m8 10 4 4 4-4" />
+          <rect x="4" y="17" width="16" height="2" rx="1" />
         </svg>
       </span>
       <span v-else class="glyph" aria-hidden="true">

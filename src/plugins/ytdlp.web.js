@@ -107,6 +107,18 @@ export class YtdlpWeb extends WebPlugin {
   async consumeSharedUrl() {
     return { url: null }
   }
+
+  async readClipboard() {
+    // A real browser DOES grant readText() on a user gesture (unlike the Capacitor
+    // WebView the native side works around), but this must never throw: the offline QA
+    // suite drives the Paste button through this mock.
+    try {
+      const text = await navigator.clipboard.readText()
+      return { text: text ?? '' }
+    } catch {
+      return { text: '' }
+    }
+  }
 }
 
 /** @param {number} ms */

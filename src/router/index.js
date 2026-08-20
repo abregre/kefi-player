@@ -4,6 +4,7 @@ import DownloaderView from '../views/DownloaderView.vue'
 import LibraryView from '../views/LibraryView.vue'
 import NowPlayingView from '../views/NowPlayingView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import { unlocked } from '../composables/useEasterEgg'
 
 /**
  * Hash history, not web history: Capacitor serves the bundle from a local origin
@@ -18,9 +19,7 @@ export const router = createRouter({
     { path: '/library', name: 'library', component: LibraryView },
     { path: '/now-playing', name: 'nowPlaying', component: NowPlayingView },
     { path: '/settings', name: 'settings', component: SettingsView },
-    // Reachable by typing the hash only — intentionally no navigation guard here yet.
-    // The tab and the unlock check that gates it both land together in a later task;
-    // until then this route exists purely so the screen can be QA'd on its own.
+    // Guarded below: unlocked users only. Locked users are redirected to /library.
     { path: '/downloader', name: 'downloader', component: DownloaderView },
     // Anything unknown (a stale hash after an update) lands on the default tab
     // rather than a blank screen.
@@ -50,5 +49,11 @@ export function wireHardwareBack() {
     }
   })
 }
+
+router.beforeEach((to) => {
+  if (to.path === '/downloader' && !unlocked.value) {
+    return '/library'
+  }
+})
 
 export default router

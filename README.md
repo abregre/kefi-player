@@ -37,7 +37,8 @@ one deliberate exception; see below.
   in the UI, and the queue moves on.
 
 Deliberately **not** in this version: playlists and favourites, sleep timer, playback
-speed, an equalizer, streaming or any network use at all.
+speed, an equalizer, streaming, or — outside the hidden downloader tab described below —
+any network use at all.
 
 ## Requirements
 
@@ -69,9 +70,16 @@ speed, an equalizer, streaming or any network use at all.
 
 The app asks for exactly one runtime permission: **`READ_MEDIA_AUDIO`** on Android 13+,
 falling back to `READ_EXTERNAL_STORAGE` (`maxSdkVersion="32"`) below it. Nothing else
-is read, and nothing ever leaves the device — there is no network code in the app.
-`POST_NOTIFICATIONS` is declared for the playback notification, and
-`FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` for the service itself.
+is read, and by default nothing leaves the device: every network-capable permission the
+manifest declares, and every line of network code, lives behind the hidden downloader tab
+(see "The hidden downloader tab" below) and stays unused unless that tab is unlocked and
+opened. `POST_NOTIFICATIONS` is declared for the playback notification,
+`FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` for the playback service, and
+`FOREGROUND_SERVICE_DATA_SYNC` for the download service. `INTERNET` (already present from
+the Capacitor scaffold, before this feature existed) and `ACCESS_NETWORK_STATE` (added for
+it) are both declared, along with a legacy `WRITE_EXTERNAL_STORAGE`
+(`maxSdkVersion="28"`) needed only pre-Android-10, where the downloader writes straight
+into `/Music` instead of through MediaStore.
 
 The Library screen renders three distinct states rather than a blank list:
 
@@ -129,6 +137,53 @@ npm run apk:release
 nobody who already installed the app can ever update it.
 
 Without a keystore, `npm run apk` (debug) still works; only release builds need one.
+
+## The hidden downloader tab
+
+A third tab, hidden by default: a YouTube-to-MP3 downloader — the one network-facing
+feature in the app, named as the exception in "What the app does" and "Permission model"
+above. A user who never unlocks the tab causes it to make zero network calls: the engine
+is only ever prepared, and only ever checked for updates, from `DownloaderView.vue`'s own
+`onMounted`, never from `main.js` or app start.
+
+Unlocked, downloads land in MediaStore under `Music/YTMP3`, so a finished file shows up in
+Songs/Albums/Artists and under Folders → YTMP3 exactly like any track already on the
+device — there is no separate "downloads" library and no folder picker: files always go to
+that one fixed location.
+
+**Unlocking it**: tap the support card at the bottom of Settings 10 times inside a
+15-second sliding window (`src/composables/useEasterEgg.js`). The card looks and behaves
+identically before and after the 10th tap — nothing about it hints that it is a target.
+The unlock:
+
+- sets a permanent preference, `kefi.downloader.unlocked` — it persists across restarts and
+  `am force-stop`, and **there is no re-lock gesture**;
+- adds the third bottom tab (Library | Downloads | Settings);
+- enables the `.ShareTarget` activity-alias at runtime, so the system Share sheet offers
+  Kefi Player as a destination for YouTube links. It ships in the manifest as
+  `android:enabled="false"` and stays invisible to the OS until this happens.
+
+**Why the engine has to run yt-dlp's nightly channel**: the yt-dlp build bundled in the APK
+is a stable release, and as of 2026-08 yt-dlp's stable channel cannot download YouTube at
+all. So the first time the downloader screen opens, it installs the `nightly` channel
+outright instead of waiting for the user to hit a broken download; every later open only
+checks for a newer nightly and offers an Update button. If that daily check fails — offline,
+or GitHub unreachable — the existing binary keeps working for whatever it already supports,
+and Update stays there to retry; nothing else in the app is affected.
+
+**The size cost**: bundling yt-dlp (CPython) and ffmpeg as native libraries grows the APK a
+lot. Measured in this project: the debug APK went from `8498205` bytes (~8.1MB) before this
+feature to `62921685` bytes (~60MB) after, for the single `arm64-v8a` ABI this app ships
+(both debug numbers; later full builds of the finished feature measured 61MB with `du -h`,
+consistent with that figure). A release APK with the downloader has not been built in this
+session — ~55-60MB is this project's own target for it, not yet a measurement.
+
+**The one TypeScript exception** this feature needs is the PO-token bundle, documented in
+its own section right below.
+
+**`ytmp3` stays a separate, separately-shipped app.** This downloader's code was copied
+from `../ytmp3`, not linked to it or kept in sync with it — divergence between the two is
+accepted and expected going forward; this repo is not a fork that ever merges back into it.
 
 ## The PO-token bundle (the one TypeScript file)
 

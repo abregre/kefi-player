@@ -1,6 +1,7 @@
 package com.kefi.player
 
 import android.app.Application
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,10 @@ class App : Application() {
         super.onCreate()
         instance = this
         Log.i("KefiApp", "KefiApp onCreate")
+
+        val prefs = getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+        val isUnlocked = prefs.getString("kefi.downloader.unlocked", null) == "1"
+        PlayerPlugin.setShareTargetEnabled(this, isUnlocked)
     }
 
     companion object {

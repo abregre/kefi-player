@@ -3,7 +3,9 @@ package com.kefi.player
 import android.Manifest
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -362,6 +364,26 @@ class PlayerPlugin : Plugin() {
         ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         call.resolve()
+    }
+
+    @PluginMethod
+    fun setShareTargetEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        Companion.setShareTargetEnabled(context, enabled)
+        call.resolve()
+    }
+
+    companion object {
+        fun setShareTargetEnabled(context: Context, enabled: Boolean) {
+            val comp = ComponentName(context, "${context.packageName}.ShareTarget")
+            val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            context.packageManager.setComponentEnabledSetting(comp, state, PackageManager.DONT_KILL_APP)
+        }
     }
 
     /**

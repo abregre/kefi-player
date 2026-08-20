@@ -1,6 +1,8 @@
 package com.kefi.player
 
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
@@ -395,6 +397,24 @@ class YtdlpPlugin : Plugin() {
     @PluginMethod
     fun consumeSharedUrl(call: PluginCall) {
         call.resolve(JSObject().apply { put("url", SharedUrlHolder.consume()) })
+    }
+
+    /**
+     * The Capacitor WebView never grants the async Clipboard API's read permission (the
+     * reason the Paste button exists on this native side at all), so the UI reads through
+     * here instead of `navigator.clipboard.readText()`. An empty clipboard resolves `""`
+     * rather than rejecting — that is a normal state, not a failure.
+     */
+    @PluginMethod
+    fun readClipboard(call: PluginCall) {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        val text = if (clip != null && clip.itemCount > 0) {
+            clip.getItemAt(0).coerceToText(context)?.toString() ?: ""
+        } else {
+            ""
+        }
+        call.resolve(JSObject().apply { put("text", text) })
     }
 
     /**

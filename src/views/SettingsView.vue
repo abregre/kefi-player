@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { LOCALES, useI18n } from '../i18n'
 import { Player } from '../plugins/player'
+import { registerTap } from '../composables/useEasterEgg'
 
 const { locale, t, setLocale } = useI18n()
 
@@ -74,7 +75,7 @@ async function addWidget() {
       the app. Until then a dead button would be worse than none.
     -->
     <h2 class="section-title">{{ t('settings.support') }}</h2>
-    <div class="card support">
+    <div class="card support" @click="registerTap()">
       <span class="support-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 20.3s-7.5-4.6-7.5-9.4a4.2 4.2 0 0 1 7.5-2.6 4.2 4.2 0 0 1 7.5 2.6c0 4.8-7.5 9.4-7.5 9.4Z" />

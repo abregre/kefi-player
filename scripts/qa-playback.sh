@@ -541,6 +541,237 @@ else
   fi
 fi
 
+# ── Downloader feature — easter egg, router guard, share alias (T17) ──────────
+#
+# All checks here are OFFLINE: no real YouTube calls, no `initialize()`, no
+# network. The web mock (ytdlp.web.js) drives the UI smoke test; the tab count,
+# route guard and share alias are plain DOM/adb assertions.
+#
+# HOW THE GESTURE IS DRIVEN: `registerTap()` is bound via `@click="registerTap()"`
+# on `.card.support` in SettingsView.vue — an ordinary DOM click handler, not
+# something private to the ES module. `.click()` on that real element over CDP
+# fires it exactly like a finger tap would (confirmed live in T16: see
+# learnings.md's "T16 — CDP verification results" table, where 10 real
+# `.card.support.click()` calls flipped the tab count from 2 to 3). So every
+# gesture case below performs REAL clicks through the app's own handler —
+# there is no shortcut through Preferences/setShareTargetEnabled for the
+# unlock itself; that native path is only used afterwards to confirm the
+# gesture's side effects actually persisted (checks 7-8) and survive a cold
+# start (check 10), mirroring what App.onCreate() re-asserts on every launch.
+
+# Resets to a known-LOCKED state without `pm clear`/`pm grant`: on a "user"-build
+# retail device the shell UID holds neither CLEAR_APP_USER_DATA nor
+# GRANT_RUNTIME_PERMISSIONS (both throw a SecurityException here — confirmed live,
+# not assumed), so a full data wipe + re-grant is simply not available from adb on
+# this class of device. Instead this deletes only the one preference key that
+# matters, via `run-as` (ordinary file ownership under the app's own uid, not a
+# privileged AMS call, so it works everywhere `pm clear` doesn't), then force-stops
+# and relaunches: with the key gone, `initializeEasterEgg()` hydrates
+# `unlocked.value = false` and — the same production path check 10 already
+# exercises — `App.onCreate()` reads the (now-absent) preference and disables the
+# `.ShareTarget` alias itself. No permission is ever revoked by this reset, so
+# there is nothing to re-grant and no prompt that could sit on top of the Settings
+# card.
+reset_locked() {
+  "${EMU[@]}" shell run-as "$PKG" rm -f /data/data/"$PKG"/shared_prefs/CapacitorStorage.xml \
+    2>/dev/null || true
+  "${EMU[@]}" shell am force-stop "$PKG"
+  sleep 1
+  launch_app || abort "could not reach the WebView after resetting to locked state (downloader section)"
+}
+
+# Navigates to #/settings and gives the route a moment to settle before any
+# click is attempted.
+goto_settings() {
+  js "location.hash = '#/settings'" > /dev/null
+  sleep 1
+}
+
+# Clicks `.card.support` $1 times inside a single CDP eval — a tight
+# synchronous loop, i.e. genuinely "rapid succession" taps landing within the
+# same event-loop turn, all through the real @click="registerTap()" handler.
+# Returns the JSON string "OK", or "NO_ELEMENT" if the card isn't on screen
+# (callers must check for that before trusting a tab-count assertion).
+tap_support() {
+  local n="$1"
+  js "(() => {
+    const el = document.querySelector('.card.support');
+    if (!el) return 'NO_ELEMENT';
+    for (let i = 0; i < $n; i++) el.click();
+    return 'OK';
+  })()"
+}
+
+step "Downloader: locked state (clean slate)"
+
+reset_locked
+
+# 1. Locked: exactly 2 tabs
+TAB_COUNT=$(js "document.querySelectorAll('.tab').length")
+[[ "$TAB_COUNT" == 2 ]] &&
+  pass "downloader locked: exactly 2 tabs in the tab bar" ||
+  fail "downloader locked: expected 2 tabs, got $TAB_COUNT"
+
+# 2. Locked: router guard redirects /downloader → /library
+goto_settings
+js "location.hash = '#/downloader'" > /dev/null
+sleep 1
+HASH_AFTER=$(js "location.hash")
+[[ "$HASH_AFTER" == '"#/library"' ]] &&
+  pass "downloader locked: navigating #/downloader redirects to #/library" ||
+  fail "downloader locked: expected #/library after guard, got $HASH_AFTER"
+
+# 3. Locked: share alias absent from system share sheet
+SHARE_COUNT=$("${EMU[@]}" shell cmd package query-activities \
+  -a android.intent.action.SEND -t text/plain 2>/dev/null |
+  grep -c "^[[:space:]]*name=com.kefi.player.ShareTarget" || true)
+[[ "$SHARE_COUNT" == 0 ]] &&
+  pass "downloader locked: ShareTarget not visible in system share sheet" ||
+  fail "downloader locked: ShareTarget unexpectedly visible ($SHARE_COUNT matches)"
+
+step "Downloader: gesture — 9 taps stay locked"
+
+# 4. GESTURE, 9 taps: nine real clicks on .card.support, one short of the
+# 10-tap threshold — must remain locked, and the guard must still redirect.
+goto_settings
+TAP9=$(tap_support 9)
+if [[ "$TAP9" == '"NO_ELEMENT"' ]]; then
+  fail "downloader gesture (9 taps): .card.support was not found on #/settings"
+else
+  sleep 1
+  TAB_AFTER_9=$(js "document.querySelectorAll('.tab').length")
+  [[ "$TAB_AFTER_9" == 2 ]] &&
+    pass "downloader gesture: 9 real taps on .card.support — still 2 tabs (below the 10-tap threshold)" ||
+    fail "downloader gesture: 9 real taps unexpectedly changed the tab count to $TAB_AFTER_9"
+
+  js "location.hash = '#/downloader'" > /dev/null
+  sleep 1
+  HASH9=$(js "location.hash")
+  [[ "$HASH9" == '"#/library"' ]] &&
+    pass "downloader gesture: after 9 taps, #/downloader still redirects to #/library" ||
+    fail "downloader gesture: after 9 taps, expected #/library, got $HASH9"
+fi
+
+step "Downloader: gesture — 10 taps spread past the 15s window stay locked"
+
+# 5. GESTURE, taps spread past the window: 5 real taps, a genuine 16s wall-clock
+# wait (longer than registerTap()'s 15000ms sliding window), then 5 more real
+# taps. 10 taps happened, but never 10 inside any 15s window — must stay
+# locked. This is the sliding-window logic's own reason to exist.
+reset_locked
+goto_settings
+FIRST5=$(tap_support 5)
+if [[ "$FIRST5" == '"NO_ELEMENT"' ]]; then
+  fail "downloader gesture (spread taps): .card.support was not found on #/settings"
+else
+  sleep 16
+  tap_support 5 > /dev/null
+  sleep 1
+  TAB_SPREAD=$(js "document.querySelectorAll('.tab').length")
+  [[ "$TAB_SPREAD" == 2 ]] &&
+    pass "downloader gesture: 10 real taps spread across >15s (5, wait 16s, 5) — still 2 tabs, the sliding window expired the first batch" ||
+    fail "downloader gesture: 10 taps spread past the window unexpectedly unlocked (tab count $TAB_SPREAD)"
+fi
+
+step "Downloader: gesture — 10 taps inside 15s unlocks"
+
+# 6. GESTURE, 10 taps inside 15s: ten real, rapid clicks on .card.support —
+# crosses the threshold inside the window, must unlock (3 tabs appear).
+reset_locked
+goto_settings
+TAP10=$(tap_support 10)
+if [[ "$TAP10" == '"NO_ELEMENT"' ]]; then
+  fail "downloader gesture (10 taps): .card.support was not found on #/settings"
+else
+  sleep 2
+  TAB_UNLOCKED=$(js "document.querySelectorAll('.tab').length")
+  [[ "$TAB_UNLOCKED" == 3 ]] &&
+    pass "downloader gesture: 10 real rapid taps on .card.support unlocked — 3 tabs now shown" ||
+    fail "downloader gesture: 10 real rapid taps did not unlock (tab count $TAB_UNLOCKED, expected 3)"
+fi
+
+step "Downloader: unlock side effects — persistence, share alias, guard"
+
+# 7. The unlock preference genuinely persisted (registerTap()'s own
+# Preferences.set call, not anything written by this script).
+PREF_XML=$("${EMU[@]}" shell run-as "$PKG" cat \
+  /data/data/"$PKG"/shared_prefs/CapacitorStorage.xml 2>/dev/null)
+echo "$PREF_XML" | grep -q 'name="kefi.downloader.unlocked">1<' &&
+  pass "downloader gesture: kefi.downloader.unlocked=1 persisted in CapacitorStorage.xml" ||
+  fail "downloader gesture: kefi.downloader.unlocked=1 not found in CapacitorStorage.xml (${PREF_XML:-empty})"
+
+# 8. The share alias registerTap() enabled is now visible to the system.
+SHARE_AFTER=$("${EMU[@]}" shell cmd package query-activities \
+  -a android.intent.action.SEND -t text/plain 2>/dev/null |
+  grep -c "^[[:space:]]*name=com.kefi.player.ShareTarget" || true)
+[[ "$SHARE_AFTER" -ge 1 ]] &&
+  pass "downloader gesture: ShareTarget now visible in system share sheet ($SHARE_AFTER match)" ||
+  fail "downloader gesture: ShareTarget not visible in share sheet after unlock (matches=$SHARE_AFTER)"
+
+# 9. Router guard lifted: /downloader no longer redirects.
+js "location.hash = '#/library'" > /dev/null
+sleep 1
+js "location.hash = '#/downloader'" > /dev/null
+sleep 1
+HASH_UNLOCKED=$(js "location.hash")
+[[ "$HASH_UNLOCKED" == '"#/downloader"' ]] &&
+  pass "downloader unlocked: navigating #/downloader stays on /downloader" ||
+  fail "downloader unlocked: expected #/downloader to stick, got $HASH_UNLOCKED"
+
+step "Downloader: persistence across process death"
+
+# 10. Persistence: force-stop + relaunch — still 3 tabs. Covers both
+# initializeEasterEgg()'s Preferences hydration and App.onCreate()'s
+# re-assertion of the share alias, from a cold start.
+"${EMU[@]}" shell am force-stop "$PKG"
+sleep 2
+launch_app || fail "downloader persistence: app did not come back after force-stop"
+sleep 2
+
+TAB_PERSIST=$(js "document.querySelectorAll('.tab').length")
+[[ "$TAB_PERSIST" == 3 ]] &&
+  pass "downloader persistence: still 3 tabs after force-stop + relaunch" ||
+  fail "downloader persistence: expected 3 tabs after relaunch, got $TAB_PERSIST"
+
+step "Downloader: UI smoke test (web mock, offline)"
+
+# 11. Downloader UI smoke test — offline, no initialize()/network involved in
+# the assertions themselves (DownloaderView's own onMounted calls initialize(),
+# which only touches the web mock in this build).
+js "location.hash = '#/downloader'" > /dev/null
+sleep 3
+
+DL_UI=$(js "JSON.stringify({
+  page: document.querySelector('.downloader-page') !== null,
+  chips: document.querySelectorAll('.chip').length,
+  btnDisabled: document.querySelector('.primary-btn') && document.querySelector('.primary-btn').disabled,
+  urlEmpty: document.querySelector('.url-input') && document.querySelector('.url-input').value === ''
+})")
+
+if [[ "$DL_UI" == __CDP_ERROR__* ]]; then
+  fail "downloader UI smoke: CDP error — ${DL_UI#__CDP_ERROR__}"
+else
+  PAGE=$(node -e "const d=JSON.parse(process.argv[1]); console.log(d.page)" "$DL_UI")
+  CHIPS=$(node -e "const d=JSON.parse(process.argv[1]); console.log(d.chips)" "$DL_UI")
+  BTN=$(node -e "const d=JSON.parse(process.argv[1]); console.log(d.btnDisabled)" "$DL_UI")
+
+  [[ "$PAGE" == true ]] &&
+    pass "downloader UI: .downloader-page is present" ||
+    fail "downloader UI: .downloader-page not found in DOM"
+
+  [[ "$CHIPS" == 3 ]] &&
+    pass "downloader UI: exactly 3 bitrate chips" ||
+    fail "downloader UI: expected 3 .chip elements, got $CHIPS"
+
+  [[ "$BTN" == true ]] &&
+    pass "downloader UI: primary-btn is disabled while URL field is empty" ||
+    fail "downloader UI: primary-btn is not disabled with empty URL field (btn.disabled=$BTN)"
+fi
+
+# Navigate back to library so the existing Summary step is clean.
+js "location.hash = '#/library'" > /dev/null
+sleep 1
+
 step "Summary"
 echo "$((CHECKS - FAILURES))/$CHECKS checks passed"
 if [[ "$FAILURES" -gt 0 ]]; then

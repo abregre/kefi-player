@@ -7,6 +7,7 @@ export default {
   'app.name': 'Kefi Player',
 
   'tab.library': 'Library',
+  'tab.downloads': 'Downloads',
   'tab.settings': 'Settings',
 
   'library.title': 'Library',
@@ -15,6 +16,7 @@ export default {
   'library.tab.artists': 'Artists',
   'library.tab.folders': 'Folders',
   'library.search': 'Search',
+  'library.scan': 'Refresh library',
   'library.loading': 'Reading your library…',
   'library.count.songs': '{count} songs',
   'library.count.song': '1 song',
@@ -75,6 +77,7 @@ export default {
   'downloader.url.notYoutube':
     'Not a YouTube link — yt-dlp supports many sites, so this may still work.',
   'downloader.url.clipboardUnavailable': 'Clipboard is not available. Paste into the box instead.',
+  'downloader.url.clipboardEmpty': 'Clipboard is empty. Copy a link first.',
   'downloader.lookup.action': 'Look up',
   'downloader.lookup.loading': 'Reading link…',
   'downloader.lookup.invalidUrl': 'Paste a full link starting with http.',

@@ -6,6 +6,7 @@ export default {
   'app.name': 'Kefi Player',
 
   'tab.library': 'Βιβλιοθήκη',
+  'tab.downloads': 'Λήψεις',
   'tab.settings': 'Ρυθμίσεις',
 
   'library.title': 'Βιβλιοθήκη',
@@ -14,6 +15,7 @@ export default {
   'library.tab.artists': 'Καλλιτέχνες',
   'library.tab.folders': 'Φάκελοι',
   'library.search': 'Αναζήτηση',
+  'library.scan': 'Ανανέωση βιβλιοθήκης',
   'library.loading': 'Διαβάζουμε τη βιβλιοθήκη σου…',
   'library.count.songs': '{count} τραγούδια',
   'library.count.song': '1 τραγούδι',
@@ -75,6 +77,7 @@ export default {
     'Δεν είναι σύνδεσμος YouTube — το yt-dlp υποστηρίζει πολλές ιστοσελίδες, οπότε μπορεί να δουλέψει και έτσι.',
   'downloader.url.clipboardUnavailable':
     'Το πρόχειρο δεν είναι διαθέσιμο. Επικόλλησε χειροκίνητα στο πλαίσιο.',
+  'downloader.url.clipboardEmpty': 'Το πρόχειρο είναι άδειο. Αντιγράψε πρώτα έναν σύνδεσμο.',
   'downloader.lookup.action': 'Έλεγχος συνδέσμου',
   'downloader.lookup.loading': 'Ανάγνωση συνδέσμου…',
   'downloader.lookup.invalidUrl': 'Επικόλλησε έναν πλήρη σύνδεσμο που να ξεκινά με http.',

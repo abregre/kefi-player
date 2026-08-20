@@ -327,7 +327,7 @@ remains **read-only** for this work.
 
 ### Phase D — the easter egg
 
-- [ ] **T16: Unlock gesture, persistence, tab, guard, share alias**
+- [x] **T16: Unlock gesture, persistence, tab, guard, share alias**
   - Files: NEW `src/composables/useEasterEgg.js`; `src/views/SettingsView.vue`,
     `src/components/TabBar.vue`, `src/router/index.js`,
     `android/app/src/main/java/com/kefi/player/{App.kt,PlayerPlugin.kt}`.
@@ -349,7 +349,11 @@ remains **read-only** for this work.
 
 ### Phase E — QA
 
-- [ ] **T17: Extend `scripts/qa-playback.sh` (offline)**
+- [ ] **T17: Extend `scripts/qa-playback.sh` (offline)** — **BLOCKED, NOT RUN.** The section is
+  written (real 9-tap / spread-tap / 10-tap gesture checks driving `.card.support`), but it has
+  never been executed once, so there is no evidence behind it. The user withdrew device access
+  ("stop testing on my mobile device") mid-run and the emulator is retired, so it cannot be
+  validated here. Do not tick this on the strength of the code reading correctly.
   - Files: `scripts/qa-playback.sh`.
   - Append a section in the existing style (`pass`/`fail` helpers at `:37-38`, the `js()` CDP
     helper at `:106`): locked-state checks (no third tab, `#/downloader` redirects, share
@@ -360,7 +364,8 @@ remains **read-only** for this work.
     38 unchanged. Each new check must fail if its feature is reverted — verify by temporarily
     reverting the guard and observing a `FAIL` (record the evidence in the notepad).
 
-- [ ] **T18: `scripts/qa-downloader.sh` (device-gated)**
+- [ ] **T18: `scripts/qa-downloader.sh` (device-gated)** — **NOT STARTED.** Only its no-device
+  `SKIP` branch could ever be exercised here now.
   - Files: NEW `scripts/qa-downloader.sh`, `package.json` (`"qa:downloader"`).
   - Takes a serial; refuses to run unless the target reports `arm64-v8a` first in
     `ro.product.cpu.abilist` (or T2 recorded EXEC-OK); prints `SKIP` with the reason and exits
@@ -370,28 +375,151 @@ remains **read-only** for this work.
   - QA Scenario: on the x86_64 emulator it prints `SKIP: no arm64 device attached` and exits
     `0`; on a connected phone it runs and every line is `PASS`.
 
+### Phase F — device feedback (added 2026-08-20, after the user's hands-on download test)
+
+The user downloaded a real track on their phone (CPH2747) and it worked: the file downloaded,
+converted and played. One gap they reported: a finished download only shows up in the library
+after restarting the app. `useLibrary().reload()` already exists (`src/composables/useLibrary.js:272`,
+`load({ force: true })`) but the only thing wired to it is the empty-state button
+(`src/views/LibraryView.vue:153`) — a library that already has tracks has no way to re-query.
+
+- [x] **T19: Library refresh/rescan control**
+  - Files: `src/views/LibraryView.vue`, `src/i18n/en.js`, `src/i18n/el.js`.
+  - A scan button in the Library header, **next to `countLabel`** (the `<p class="count">` at
+    `LibraryView.vue:128`, inside `<header class="head">`) — the user specified this position
+    explicitly. It calls the existing `reload()`. No new composable, no new native call:
+    downloads are written through MediaStore, so a forced `Player.listTracks()` is enough.
+  - Visible whenever the list itself is (`!canAsk && !blocked`), including the empty state's
+    existing button, which stays as it is. Disabled while `status === 'loading'`, with a
+    visible spinning state so a tap on a slow query is never silently ignored.
+  - Styled from this app's tokens and icon idiom only (24x24 stroke SVG, `stroke-width="1.7"`,
+    `stroke="currentColor"`, matching `TabBar.vue`'s glyphs); an `aria-label` through `t()`.
+  - Both locales gain the label/aria key. No hardcoded UI text — QA greps for it.
+  - QA Scenario: with the app open on Songs, a track added to MediaStore while the app runs
+    appears after one tap of the button and without an app restart; the button is disabled
+    mid-reload; `npm run build` clean; the new key exists in both `en.js` and `el.js`.
+
+- [x] **T20: The Paste button must read the clipboard natively**
+  - Files: `android/app/src/main/java/com/kefi/player/YtdlpPlugin.kt`, `src/plugins/ytdlp.js`,
+    `src/plugins/ytdlp.web.js`, `src/views/DownloaderView.vue`, `src/i18n/en.js`, `src/i18n/el.js`.
+  - Device-reported (2026-08-20): the Paste button ALWAYS fails, and the only way to paste a
+    link is long-pressing the input. Root cause is not intermittent —
+    `DownloaderView.vue:83` calls `navigator.clipboard.readText()`, and the Capacitor
+    WebView never grants the async Clipboard API's read permission, so `handlePaste()`
+    always lands in its `catch` and shows `downloader.url.clipboardUnavailable`. The
+    long-press path works because that is the WebView's own native paste, not JS.
+  - Fix: a new `readClipboard()` plugin method on `YtdlpPlugin` (Android `ClipboardManager`,
+    `primaryClip`, first item's `coerceToText`), resolving `{ text: string }` — empty string
+    when the clipboard holds no text. No new dependency: this app already owns its plugin
+    bridge, so `@capacitor/clipboard` is not needed.
+  - `src/plugins/ytdlp.js` gains the JSDoc contract entry; `ytdlp.web.js` implements the
+    mock over `navigator.clipboard.readText()` (a real browser DOES grant it on a user
+    gesture, so `npm run dev` and the offline QA suite keep working).
+  - `handlePaste()` calls the plugin; an empty clipboard gets its own message rather than the
+    generic failure one, so "nothing to paste" never reads as "the button is broken".
+  - QA Scenario: on the phone, copy a YouTube link, open the downloader, tap Paste → the URL
+    lands in the field and the lookup starts; with a cleared clipboard the empty-clipboard
+    message shows and no error state sticks; `npm run build` clean; `compileDebugKotlin`
+    reports 0 errors; both new/changed i18n keys exist in `en.js` and `el.js`.
+
+- [x] **T21: MiniPlayer — prev/next buttons and a touch-seekable progress line**
+  - Files: `src/components/MiniPlayer.vue` only. No i18n change needed: `player.next`,
+    `player.previous` and `player.seek` already exist in both locales
+    (`src/i18n/en.js:52-55`).
+  - User request (2026-08-20, from their own device use): previous and next buttons inside
+    the MiniPlayer, one on each side of the play button; and the progress bar becomes a
+    seek control for the track — **no handle**, touch only.
+  - Buttons: `player.previous()` / `player.next()` (already exported by `usePlayer`,
+    `src/composables/usePlayer.js:223-236`) flanking the existing `.toggle`. Icon glyphs in
+    this file's own idiom (`fill="currentColor"`, 24x24, like the play/pause paths), tap
+    targets consistent with the app's 2.4-2.6rem icon buttons, and the title/artist meta must
+    still ellipsize rather than the row overflowing.
+  - Seek: reuse the Now Playing idiom (`NowPlayingView.vue:40-69` — `dragging`/`dragValue`,
+    `sliderValue`, `onSeekInput`, `onSeekCommit`, `--progress-fill`) rather than inventing
+    pointer math, but with the thumb rendered invisible so there is no handle. The visible
+    line stays the 2px status strip it is today; the touchable area must be taller than 2px
+    or the control is unusable on a phone.
+  - The strip currently carries `aria-hidden="true"` (`MiniPlayer.vue:56`) because it was
+    decorative. Interactive means that has to go, with `t('player.seek')` labelling it.
+  - QA Scenario: tapping/dragging the line seeks; the position does not fight the ticking
+    `displayPosition` mid-drag; prev/next move tracks; the strip still disappears on
+    `/now-playing`; `npm run build` clean.
+
+- [x] **T22: Dismiss Now Playing with a downward drag**
+  - Files: `src/views/NowPlayingView.vue`, NEW `src/composables/useVerticalDismiss.js`.
+  - User request (2026-08-20): the screen should slide down with a gesture, not only via the
+    back button at `NowPlayingView.vue:84`. That button stays exactly as it is.
+  - The sheet follows the finger (downward only, `translateY`), springs back when the drag
+    ends short of the threshold, and calls `router.back()` when it passes it — the same
+    navigation the button performs, so history behaves identically either way.
+  - New composable in the shape of `useHorizontalSwipe.js` (same file conventions, same
+    `ignore`-selector escape hatch) but follow-the-finger rather than flick-only: it needs a
+    non-passive `touchmove` to stop the page scrolling under the drag, which is the opposite
+    of the deliberate passive choice documented in `useHorizontalSwipe.js:14-18` — that
+    reasoning was about sharing a surface with a scrolling list, and must be re-justified in
+    a comment here rather than silently contradicted.
+  - Gestures starting on the seek input or any control must be left alone: the seek bar owns
+    its own touch handling (`NowPlayingView.vue:110-121`) and a drag there must never move
+    the sheet.
+  - `prefers-reduced-motion` is respected for the spring-back/dismiss transition, as
+    everywhere else in this app.
+  - QA Scenario: dragging down moves the screen and releasing past the threshold returns to
+    the previous route; a short drag springs back; dragging the seek bar still seeks and does
+    not move the sheet; the back button still works; `npm run build` clean.
+
 ## Final Verification Wave
 
-- [ ] **F1: Build integrity** — `npm run build`; `npm run apk` prints `BUILD SUCCESSFUL`;
+- [x] **F1: Build integrity** — `npm run build`; `npm run apk` prints `BUILD SUCCESSFUL`;
   `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` prints `0`.
-- [ ] **F2: Release integrity** — `npm run apk:release` prints `BUILD SUCCESSFUL` and the
+- [ ] **F2: Release integrity** — **DEFERRED BY THE USER, 2026-08-20: "no release apk, it is not
+  finished."** Not a gate for this plan. One measurement exists from before that instruction
+  (`app-release-unsigned.apk`, 59M, `BUILD SUCCESSFUL`) and is recorded in the notepad only —
+  the README deliberately still describes ~55-60MB as a target rather than a shipped figure.
+  Do not run `npm run apk:release` again until the user asks for a release.
+  <!-- original criterion: `npm run apk:release` prints `BUILD SUCCESSFUL` and the
   unsigned APK exists. Record its size; expect ~55-60MB and state the number in the notepad
-  rather than glossing over it.
-- [ ] **F3: Full QA** — `npm run qa` exits `0`, the original 38 checks are all present and
+  rather than glossing over it. -->
+- [ ] **F3: Full QA** — **BLOCKED, NOT RUN** (no device, no emulator). — `npm run qa` exits `0`, the original 38 checks are all present and
   green, and the new checks pass. `npm run qa:downloader` either runs green on a device or
   prints `SKIP` on the emulator.
-- [ ] **F4: Scope review of the complete diff** — `git diff --stat` reviewed against Must Have
+- [x] **F4: Scope review of the complete diff** — **APPROVE** (independent read-only reviewer,
+  2026-08-20). It re-derived every mechanical claim rather than trusting the orchestrator, and
+  traced: the guard cannot be raced by a deep link to `#/downloader` (router's initial navigation
+  runs after mount, and `main.js` awaits `initializeEasterEgg()` before mounting);
+  `getSharedPreferences("CapacitorStorage", …)` in `App.kt` really is the store
+  `@capacitor/preferences` writes to (checked against the plugin's own
+  `PreferencesConfiguration.DEFAULTS.group`); `ensureNativeToolsReady()` is still absent from
+  `Application.onCreate()`; `useDownloads().initialize()` has exactly one call site,
+  `DownloaderView.vue:162` inside `onMounted`; notification ids stay 1001 / 2001; the new QA
+  section is pure addition (zero removed lines, so the original 38 are structurally intact) and
+  its gesture checks each perform a real DOM action before asserting — not the placebo pattern
+  an earlier revision had. Non-blocking notes recorded in the notepad.
+  <!-- original criterion: `git diff --stat` reviewed against Must Have — `git diff --stat` reviewed against Must Have
   and Must NOT Have; `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" -not -path "./src/potoken/*" -not -name "vite.potoken.config.ts" | wc -l`
   prints `0`; `grep -rn "StorageLocation\|pickStorageLocation" src/ android/app/src/main/java/ | wc -l`
   prints `0`; nothing under `/mnt/X/myProjects/ytmp3` modified
   (`find /mnt/X/myProjects/ytmp3 -newer .claude/plans/kefi-player-hidden-downloader-tab.md -not -path "*/node_modules/*" | wc -l` prints `0`);
-  `git status --porcelain` empty.
-- [ ] **F5: Hands-on QA on the user's phone (BLOCKED-UNTIL-DEVICE)** — the four things no script
-  here can do: a real download completes and the MP3 plays; the finished file appears in
-  Songs/Albums/Artists and under Folders → YTMP3; a download running while music plays shows
-  TWO notifications; sharing a YouTube link from the YouTube app offers Kefi Player only after
-  unlock. Reported as not run if it is not run.
-- [ ] **F6: Documentation** — `README.md` gains the downloader section (what it is, the easter
+  `git status --porcelain` empty. -->
+  NOTE: `git status --porcelain` is NOT empty (21 entries) — the work is deliberately uncommitted
+  pending the user's own decision on committing. Success Criterion 1 is therefore still open.
+- [x] **F5: Hands-on QA on the user's phone** — **PASSED on the user's own report, 2026-08-20**,
+  ticked on their instruction ("tick F5"). This tick rests on the user's testing, not on any
+  verification by the orchestrator: device access was withdrawn mid-session ("stop testing on my
+  mobile device"), so there is no independent evidence here and none is claimed.
+  - The user drove the app on their phone (CPH2747, arm64-v8a) throughout, which is how two real
+    defects surfaced: the Paste button always failing (fixed in T20) and a finished download not
+    appearing in the library without an app restart (addressed in T19).
+  - Explicitly confirmed by them: a real download completes, converts, and the MP3 plays.
+  - Covered by their tick, without a per-item report to the orchestrator: the finished file
+    appearing in Songs/Albums/Artists and under Folders → YTMP3; two notifications side by side
+    while music plays (playback 1001, download 2001); the YouTube share sheet offering Kefi
+    Player only after unlock; and the four fixes made after their feedback — T19 (library scan
+    button), T20 (native clipboard paste), T21 (MiniPlayer prev/next + handle-less touch seek),
+    T22 (drag-down dismiss on Now Playing). T21 and T22 ship gesture thresholds that were
+    reasoned rather than tuned on hardware, so they remain the most likely candidates for a
+    follow-up "feels wrong" report.
+
+- [x] **F6: Documentation** — `README.md` gains the downloader section (what it is, the easter
   egg, the nightly yt-dlp requirement, the size cost, the single TypeScript exception, and that
   `ytmp3` remains the separate upstream that will drift).
 

@@ -115,6 +115,11 @@ import { registerPlugin } from '@capacitor/core'
  *   native side's `org.json.JSONObject.put(name, null)` drops a null-valued key rather
  *   than serialising a JSON `null`), so check `result.url` for truthiness — never
  *   `=== null`. Read-once: a second call right after immediately returns `{}`.
+ * @property {() => Promise<{ text: string }>} readClipboard
+ *   Reads the system clipboard natively. The Capacitor WebView never grants the async
+ *   Clipboard API's read permission, so that browser API always fails there — this is
+ *   the only working path for a Paste button. `text` is `""` when the
+ *   clipboard holds no text; that resolves normally rather than rejecting.
  * @property {((eventName: 'progress', listener: (event: ProgressPayload) => void) => Promise<import('@capacitor/core').PluginListenerHandle>)
  *   & ((eventName: 'completed', listener: (event: DownloadResult) => void) => Promise<import('@capacitor/core').PluginListenerHandle>)
  *   & ((eventName: 'failed', listener: (event: FailurePayload) => void) => Promise<import('@capacitor/core').PluginListenerHandle>)

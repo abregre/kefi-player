@@ -80,10 +80,15 @@ async function handleDownload() {
 
 async function handlePaste() {
   try {
-    const text = await navigator.clipboard.readText()
-    if (text.trim()) {
-      url.value = text.trim()
+    // The Capacitor WebView never grants the async Clipboard API's read permission, so
+    // this reads through the native plugin instead of the browser's clipboard API.
+    const { text } = await Ytdlp.readClipboard()
+    const trimmed = text.trim()
+    if (trimmed) {
+      url.value = trimmed
       await handleLookup()
+    } else {
+      lookupError.value = t('downloader.url.clipboardEmpty')
     }
   } catch {
     lookupError.value = t('downloader.url.clipboardUnavailable')
