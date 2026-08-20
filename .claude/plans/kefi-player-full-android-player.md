@@ -504,7 +504,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     renders the orange embedded cover while `Kefi Vol 1` renders the placeholder;
     `$EMU exec-out screencap -p > /tmp/kefi-albums.png` for the record.
 
-- [ ] **T17: Persistent mini-player**
+- [x] **T17: Persistent mini-player**
   - Files: NEW `src/components/MiniPlayer.vue`; `src/App.vue`.
   - Mounted **outside** `<RouterView>`, above the tab bar. Artwork, title, artist, play/pause,
     thin progress line. Hidden entirely when there is no current track. Tapping routes to

@@ -4,6 +4,7 @@
 // that is what keeps playback controls (and their local position interpolation)
 // alive across a tab change.
 import { onMounted, watch } from 'vue'
+import MiniPlayer from './components/MiniPlayer.vue'
 import TabBar from './components/TabBar.vue'
 import { usePlayer } from './composables/usePlayer'
 
@@ -63,7 +64,7 @@ watch(player.lastError, (value) => {
     <main class="content">
       <RouterView />
     </main>
-    <!-- TODO(T17): <MiniPlayer /> mounts here, outside <RouterView>, above the tabs. -->
+    <MiniPlayer />
     <TabBar />
   </div>
 </template>
@@ -73,7 +74,7 @@ watch(player.lastError, (value) => {
   /* Route area scrolls; mini-player and tab bar are pinned by the grid, so no
      fixed positioning and no scroll-jump when the keyboard opens. */
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr auto auto;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;

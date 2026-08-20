@@ -1219,3 +1219,34 @@ smooth bar with zero extra IPC.
   on a miss, re-derives the offset from the real `clientY` and taps once more, failing loudly if
   that still misses. Any future UI QA on this project must keep that verification: a silent
   off-by-N turns a QA step into a no-op that still "passes".
+
+## T17 — Persistent mini-player (2026-08-20)
+- NEW `src/components/MiniPlayer.vue`; `App.vue` mounts it between `<RouterView>` and `<TabBar>`
+  (grid rows `1fr auto auto`), so navigation cannot remount it. `useLibrary` gained a
+  `trackByUri` computed: the snapshot carries a uri but no MediaStore `id`, and artwork needs
+  the id — the library already knows both.
+- **The coordinator's T17/T18 note is implemented in `usePlayer`, not in the component**, so both
+  the mini-player and Now Playing share one interpolation: every `applySnapshot` re-bases
+  `positionBase` + `positionBasedAt = performance.now()`, a 250ms local `setInterval` bumps a
+  `tickCount` ref, and `displayPosition` = `positionBase + (now - basedAt)` while playing, clamped
+  to `duration`, frozen at the reported value while paused. **Zero bridge calls** — the ticker
+  only increments a number. The raw `currentPosition` ref is still exposed and still only moves on
+  real events, which is what the `[QA]` log line reports.
+- The ticker is started/stopped by a MODULE-LEVEL `watch(isPlaying, …)`: it follows playback for
+  the app's lifetime, not any component's, so it keeps running while the route changes.
+- Title/artist resolution order is snapshot → library record → `t('nowPlaying.unknown…')`. The
+  snapshot wins because it is the playing truth even for a file MediaStore has not indexed.
+- QA (device, after `pm clear` + re-grant so nothing was restored): mini-player absent from the
+  DOM before any playback ✓; tapping `Άσπρη Μέρα` renders it with title, artist and the embedded
+  cover ✓; progress fill advanced 1.95% → 3.76% across 3s with no bridge call in between (local
+  interpolation) ✓; `/library → /settings → /library` kept `state=PLAYING(3)` with the fill rising
+  monotonically 11.5% → 13.2% → 14.9% (no remount) ✓; tapping the body routed to `#/now-playing` ✓;
+  the toggle paused (`state=PAUSED(2)`, label → `Play`) and resumed (`state=PLAYING(3)`) ✓
+  (`/tmp/kefi-miniplayer.png`).
+- **QA tooling, second false-negative class fixed.** `tapsel.sh`'s hit check ran AFTER the tap, but
+  a tap that causes a re-render (the play/pause icon swapping) detaches the element the event fired
+  on, so `contains()` said "miss" for taps that landed. The hit test now runs INSIDE the capture
+  listener at click time (`e.target.closest(window.__tapSel)`). Second trap: the listener is
+  installed behind a `window.__tapHookV2` guard, and the old guard name kept the OLD listener alive
+  in the page context after the fix — any change to that listener needs a version bump, otherwise a
+  long-lived WebView silently keeps running the previous version.

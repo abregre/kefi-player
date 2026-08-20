@@ -1,4 +1,4 @@
-import { readonly, ref } from 'vue'
+import { computed, readonly, ref, watch } from 'vue'
 import { Player } from '../plugins/player'
 
 /**
@@ -34,6 +34,22 @@ const lastError = ref(null)
 let listenersReady = false
 let visibilityHandlerReady = false
 
+/*
+ * Locally interpolated position (T17/T18).
+ *
+ * `playerState` fires on state CHANGES only — never continuously — so a progress or
+ * seek bar bound straight to `currentPosition` sits frozen between events (observed
+ * during T8: the WebView showing 9930 while the native side was at 32813). Polling the
+ * bridge is forbidden (Must NOT Have), and rightly so: the answer is derivable without
+ * any IPC. Every snapshot re-bases `positionBase`/`positionBasedAt`, and a purely local
+ * 250ms ticker bumps `tickCount` so `displayPosition` recomputes. Zero bridge calls.
+ */
+const positionBase = ref(0)
+let positionBasedAt = 0
+const tickCount = ref(0)
+/** @type {ReturnType<typeof setInterval> | null} */
+let ticker = null
+
 /**
  * @param {unknown} err
  * @returns {string}
@@ -53,6 +69,8 @@ function applySnapshot(snapshot) {
   title.value = snapshot.title
   artist.value = snapshot.artist
   currentPosition.value = snapshot.currentPosition
+  positionBase.value = snapshot.currentPosition
+  positionBasedAt = performance.now()
   duration.value = snapshot.duration
   isPlaying.value = snapshot.isPlaying
   shuffleModeEnabled.value = snapshot.shuffleModeEnabled
@@ -61,6 +79,40 @@ function applySnapshot(snapshot) {
   currentIndex.value = snapshot.currentIndex
   stateError.value = ''
 }
+
+/**
+ * The value every progress bar should render: the last known native position plus the
+ * time elapsed since it was reported, while playing. Clamped to `duration` so a bar
+ * cannot overshoot 100% if a track-end event is a beat late. Paused sits still at the
+ * reported position, which is the truth — the native side is not advancing either.
+ */
+const displayPosition = computed(() => {
+  // Read the tick so the computed re-evaluates on every local tick; the value itself
+  // is meaningless.
+  void tickCount.value
+  if (!isPlaying.value) return positionBase.value
+  const projected = positionBase.value + (performance.now() - positionBasedAt)
+  return duration.value > 0 ? Math.min(projected, duration.value) : projected
+})
+
+function startTicker() {
+  if (ticker != null) return
+  // 250ms: four repaints a second is smooth for a progress line and costs nothing —
+  // it touches no native code and no layout beyond the bar's own width.
+  ticker = setInterval(() => {
+    tickCount.value += 1
+  }, 250)
+}
+
+function stopTicker() {
+  if (ticker == null) return
+  clearInterval(ticker)
+  ticker = null
+}
+
+// Module-level and deliberately never stopped: the ticker follows playback for the
+// app's lifetime, not any one component's.
+watch(isPlaying, (playing) => (playing ? startTicker() : stopTicker()), { immediate: true })
 
 /**
  * PUSH half. Subscribes to native `playerState` broadcasts and is attached
@@ -217,6 +269,7 @@ export function usePlayer() {
     title: readonly(title),
     artist: readonly(artist),
     currentPosition: readonly(currentPosition),
+    displayPosition,
     duration: readonly(duration),
     isPlaying: readonly(isPlaying),
     shuffleModeEnabled: readonly(shuffleModeEnabled),

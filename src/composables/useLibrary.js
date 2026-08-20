@@ -157,6 +157,16 @@ function groupBy(field, fallbackKey) {
 }
 
 const albums = computed(() => groupBy('album', ''))
+/**
+ * Lookup from a content uri to the full track record. The player's snapshot carries a
+ * uri (and only a title/artist), but artwork needs the MediaStore `id` and the mini-
+ * player wants the album name — both of which the library already knows.
+ */
+const trackByUri = computed(() => {
+  const map = new Map()
+  for (const track of tracks.value) map.set(track.uri, track)
+  return map
+})
 const artists = computed(() => groupBy('artist', ''))
 
 /**
@@ -185,6 +195,7 @@ export function useLibrary() {
   return {
     albums,
     artists,
+    trackByUri,
     artwork: readonly(artwork),
     loadArtwork,
     tracks: readonly(tracks),
