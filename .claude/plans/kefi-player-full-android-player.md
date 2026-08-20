@@ -514,7 +514,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     throughout and position increases monotonically (proving no remount); before any playback
     the mini-player is absent from the DOM.
 
-- [ ] **T18: Now Playing screen**
+- [x] **T18: Now Playing screen**
   - Files: `src/views/NowPlayingView.vue`.
   - Large artwork (or placeholder), title/artist/album, seek bar bound to
     `positionMs`/`durationMs`, play/pause, next/previous, shuffle toggle, repeat cycling

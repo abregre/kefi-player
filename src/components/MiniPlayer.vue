@@ -1,10 +1,11 @@
 <script setup>
 import { computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
 
+const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const player = usePlayer()
@@ -22,6 +23,14 @@ watch(
   },
   { immediate: true },
 )
+
+/*
+ * On Now Playing the strip would be a second copy of the same controls, so it is
+ * hidden with CSS rather than `v-if`: the component must stay mounted (it lives
+ * outside <RouterView> precisely so navigation never remounts it), it just has
+ * nothing to say while the full player is on screen.
+ */
+const hidden = computed(() => route.path === '/now-playing')
 
 const cover = computed(() => (track.value ? artwork.value[track.value.id] : null))
 /** Snapshot first (it is the playing truth), library second, placeholder last. */
@@ -43,7 +52,7 @@ function toggle() {
 <template>
   <!-- Hidden entirely (not merely blank) until something is loaded, so the library
        gets the full height until there is a player to show. -->
-  <div v-if="player.mediaId.value" class="mini">
+  <div v-if="player.mediaId.value" class="mini" :class="{ hidden }" :aria-hidden="hidden">
     <div class="progress" aria-hidden="true">
       <div class="progress-fill" :style="{ width: `${progress}%` }" />
     </div>
@@ -90,6 +99,10 @@ function toggle() {
 .mini {
   background: var(--surface-1);
   border-top: 1px solid var(--border);
+}
+
+.mini.hidden {
+  display: none;
 }
 
 /* Thin line rather than a full bar: the mini-player is a status strip, and the

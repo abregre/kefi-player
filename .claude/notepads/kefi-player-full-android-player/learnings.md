@@ -1250,3 +1250,28 @@ smooth bar with zero extra IPC.
   installed behind a `window.__tapHookV2` guard, and the old guard name kept the OLD listener alive
   in the page context after the fix — any change to that listener needs a version bump, otherwise a
   long-lived WebView silently keeps running the previous version.
+
+## T18 — Now Playing screen (2026-08-20)
+- Rewrote `src/views/NowPlayingView.vue`: large artwork/placeholder, title/artist/album, a seek
+  bar with elapsed + remaining labels, and the transport row (shuffle · previous · play/pause ·
+  next · repeat). Also hid the mini-player on this route — see below.
+- **Every control renders from the snapshot, with exactly one exception, and that exception is
+  deliberate**: a `dragging`/`dragValue` pair that lives only for the duration of a drag. Without
+  it the 250ms interpolation tick yanks the thumb back out from under the finger. On `change`
+  (release) it calls `seek()` and drops back to snapshot-derived rendering immediately, so nothing
+  about which icon is shown, or whether shuffle is on, is ever remembered locally.
+- Repeat cycles `off → all → one → off` and the `one` state gets a `1` badge — `all` and `one`
+  are otherwise the same glyph, and the plan's QA requires them to be distinguishable after a
+  restore. The button reads and writes the STRING `off|one|all` per T10's wire contract.
+- **Mini-player is hidden on `/now-playing` with `display: none`, NOT `v-if`.** It must stay
+  mounted (it sits outside `<RouterView>` exactly so navigation cannot remount it, T17's QA);
+  it simply has nothing to add while the full player is on screen. Verified: on `/now-playing`
+  `miniMounted: true, miniVisible: false`, and it is visible again after `KEYCODE_BACK`.
+- QA (device): opening from the mini-player showed `Ωδή / Δήμητρα Παπαδοπούλου / Κέφι Vol 2`
+  with `max=239999` ✓; seek to `120000` landed at `position=120012` (12ms off, tolerance 3000)
+  with `state=PLAYING(3)` ✓; `next` → `Zeibekiko`, `previous` → `Ωδή`, `previous` again →
+  `Άσπρη Μέρα` (both directions) ✓; shuffle tap → `shuffleModeEnabled: true` in the native
+  snapshot with the button showing `aria-pressed="true"` ✓; two repeat taps → `Repeat all` then
+  `Repeat one` with the badge, native snapshot `"repeatMode":"one"` ✓; `am force-stop` + relaunch
+  re-rendered shuffle ON, repeat ONE, `Play` (i.e. paused, per T12) and `0:30` against the native
+  `position=30098` ✓ (`/tmp/kefi-nowplaying.png`, `/tmp/kefi-nowplaying-restored.png`).
