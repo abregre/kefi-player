@@ -593,6 +593,13 @@ Every line below is a command with an expected output and needs no human interve
 3. `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` → `0`
 4. `unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -c 'lib/'` → `0`
 5. `adb -s emulator-5554 shell dumpsys activity services com.kefi.player | grep -c mediaPlayback` → `>= 1`
+   **CORRECTION (verified 2026-08-20, API 36):** this literal grep returns `0` and always
+   will — `dumpsys` prints the foreground type as a bitmask, never the manifest's word:
+   `isForeground=true foregroundId=1001 types=0x00000002`, where `0x2` is
+   `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`. The equivalent, actually-checkable criterion
+   (and what `scripts/qa-playback.sh` asserts) is that line with bit `0x2` set, plus
+   `grep -c 'foregroundServiceType="mediaPlayback"' android/app/src/main/AndroidManifest.xml`
+   → `1`. Both verified green.
 6. Screen-off advance: `P2 - P1 >= 12000` ms across a 15s window with `state=3` throughout.
 7. Rehydration: after `always_finish_activities 1` + HOME + 10s + relaunch, the WebView shows
    a non-null track whose position is within 3000ms of `dumpsys media_session`.

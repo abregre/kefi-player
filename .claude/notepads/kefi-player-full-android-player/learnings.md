@@ -1376,3 +1376,15 @@ smooth bar with zero extra IPC.
   what stays manual and why), and the roadmap (playlists+favourites on Room → sleep timer +
   playback speed → widget; equalizer declined). Stale text fixed: the playback engine is no
   longer "will be native", and the "no `.kt` file exists yet" note now lists the six Kotlin files.
+
+## Success-criteria sweep (2026-08-20)
+All 15 numbered criteria verified, with one correction recorded in the plan itself:
+- (1) `git status --porcelain` → 0 ✓ · (2) one `BUILD SUCCESSFUL` ✓ · (3) `^e:` → 0 ✓ ·
+  (4) `unzip -l app-debug.apk | grep -c 'lib/'` → **0** ✓ (no native payload, as intended) ·
+  (6)-(8), (12), (13) → `npm run qa` 29/29 ✓ · (9)-(11) → the UI sweep ✓ ·
+  (14) forbidden identifiers → 0 ✓ · (15) `*.ts` → 0 ✓.
+- **(5) is unsatisfiable as written and the plan now says so**: `dumpsys activity services |
+  grep -c mediaPlayback` returns `0` on API 36 because dumpsys prints the type as a bitmask
+  (`types=0x00000002`), never the manifest word. Checked instead: that line with bit `0x2`
+  set (runtime) **and** `foregroundServiceType="mediaPlayback"` in the manifest (declaration).
+  Both green. This is the same trap that produced a false FAIL in T20's first run.
