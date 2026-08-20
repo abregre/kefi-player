@@ -1080,3 +1080,39 @@ smooth bar with zero extra IPC.
   dependency or any `.ts` file. Did NOT edit any plan checkbox (a pre-existing uncommitted
   diff to the plan file, checking off T6-T11 and correcting their QA scripts, was already
   present in the working tree before this task started — left untouched, not staged).
+
+## T13 — Router, tab bar, back button (2026-08-20)
+- NEW `src/router/index.js` (`createWebHashHistory`, routes `/library` default, `/now-playing`,
+  `/settings`, plus a catch-all redirect to `/library` so a stale hash after an update can never
+  render a blank WebView), NEW `src/components/TabBar.vue` (2 tabs only — Now Playing is reached
+  from the mini-player, per Must Have 9), NEW `src/views/{Library,NowPlaying,Settings}View.vue`
+  (deliberate stubs; T14-T19 fill them), rewritten `src/App.vue`, `src/main.js`.
+- **The dev QA panel is gone**, as RESUME.md required — but its two `console.log` lines were
+  KEPT in `App.vue` under a `[QA]` tag (renamed from `[T8 QA]`/`[T11 QA]`). They are the only
+  window the scripted scenarios have into WebView-side state (`adb logcat -s Capacitor/Console`),
+  and T8/T12/T20 assertions depend on it. **T20's script must grep for `[QA] playerState` and
+  `[QA] trackUnavailable`.**
+- Back button lives in `wireHardwareBack()` in the router module, called once from `main.js`
+  (attach-once, same discipline as usePlayer's listeners): at `/library` → `CapacitorApp.exitApp()`,
+  elsewhere → `router.back()`, falling back to `router.replace('/library')` when
+  `window.history.state?.back` is absent (a WebView rebuilt straight onto `#/now-playing` has an
+  empty history stack — this is reachable in practice after the T8 renderer kill).
+- **UI QA tooling discovered here, reusable by every remaining Phase B task.** The debug build's
+  WebView is devtools-debuggable, so UI assertions do not need OCR or blind taps:
+  `adb shell cat /proc/net/unix | grep -o "webview_devtools_remote_[0-9]*"` →
+  `adb forward tcp:9222 localabstract:<that>` → `http://127.0.0.1:9222/json/list` gives a
+  `webSocketDebuggerUrl`; Node 22 has a global `WebSocket`, so a ~20-line script can
+  `Runtime.evaluate` any expression in the app (`location.hash`, `querySelectorAll(...).length`,
+  and — critically for T15 — setting a Greek search string that `adb shell input text` cannot type).
+  Helpers live in the session scratchpad (`cdp.mjs`, `tapsel.sh`), deliberately NOT committed:
+  T20's committed suite covers native assertions only.
+- **Tap-coordinate offset, measured empirically:** device_y = (css_y * devicePixelRatio) + 63.
+  The 63px is the status bar; `window.screenY` reports 0 in a Capacitor WebView and cannot be
+  used for it. On this AVD dpr = 2.625, viewport 412x839 CSS px, screen 1080x2400 device px.
+  A tap without the offset lands ~24 CSS px high and silently misses the tab bar.
+- QA (all on `emulator-5554`, API 36): `npm run build` ✓; `npm run apk` → `BUILD SUCCESSFUL`;
+  routes `#/library → #/settings → #/now-playing` each rendered and screencapped
+  (`/tmp/kefi-{library,settings,now-playing}.png`); `KEYCODE_BACK` from `/now-playing` → `#/settings`
+  with `topResumedActivity=com.kefi.player/.MainActivity` still ✓; `KEYCODE_BACK` at `/library` →
+  `topResumedActivity=com.google.android.apps.nexuslauncher` and zero `com.kefi.player` activity
+  records ✓ (app backgrounded, not crashed).

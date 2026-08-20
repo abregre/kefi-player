@@ -446,7 +446,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
 
 ### Phase B — the shell
 
-- [ ] **T13: Router, tab bar, back button**
+- [x] **T13: Router, tab bar, back button**
   - Files: `package.json` (add `vue-router`, `@capacitor/app`, `@capacitor/preferences@^8.0.1`);
     NEW `src/router/index.js`, `src/views/LibraryView.vue`, `src/views/NowPlayingView.vue`,
     `src/views/SettingsView.vue`, `src/components/TabBar.vue`; rewrite `src/App.vue` as the
