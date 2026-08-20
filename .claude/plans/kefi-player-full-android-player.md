@@ -576,12 +576,14 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
   returns no matches; `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" | wc -l` prints `0`;
   `grep -c "media3-ui\|media3-datasource\|decoder-ffmpeg\|exoplayer-av1" android/app/build.gradle` prints `0`;
   `git status --porcelain` is empty (everything committed).
-- [ ] **F5: Hands-on QA — NOT RUN (BLOCKED-UNTIL-DEVICE, 2026-08-20).** No physical
-  Android device has been connected at any point (`adb devices` lists only
-  `emulator-5554`), so this wave was **not executed** and is reported as not run — never
-  as passed. Everything it covers is unscriptable by construction; see the QA section of
-  `README.md`. Original text follows.
-- [ ] **F5 (original):** The four items proven unscriptable:
+- [x] **F5: Hands-on QA — RUN AND PASSED (2026-08-20).** Was blocked while no physical
+  device existed (`adb devices` listed only `emulator-5554`). The user has since run the
+  app on their own Android 15/16 phone and reports all four items behaving correctly:
+  audibility, Bluetooth A2DP/AVRCP routing with headset transport, lock-screen controls,
+  and wired-headset unplug. **Verified by the user on hardware, not by the agent** — which
+  is the whole point of this wave: it is the one thing no script can stand in for. Original
+  text follows.
+- [x] **F5 (original):** The four items proven unscriptable:
   audibility; real Bluetooth A2DP/AVRCP routing plus play/pause/next from the headset;
   lock-screen control appearance; wired-headset unplug pausing rather than blasting the
   speaker. Run `adb -s <serial> shell dumpsys media_session | grep state=` before and after

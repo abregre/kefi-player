@@ -1564,3 +1564,15 @@ and `index.html` says `lang="en"`. The workaround of writing the dictionary with
 («Γλωσσα») breaks the actual spelling everywhere else, including for screen readers.
 Fix: `src/i18n/index.js` watches the locale and sets `document.documentElement.lang`.
 Verified on device — the source string is «Γλώσσα» and it renders «ΓΛΩΣΣΑ».
+
+## F5 closed — hands-on QA passed on hardware (2026-08-20)
+The user ran the four unscriptable items on their own Android 15/16 phone and reports all
+four correct: audibility, real Bluetooth A2DP/AVRCP routing (including transport from the
+headset), lock-screen controls, and wired-headset unplug pausing rather than blasting the
+speaker. Verified by the user on hardware, not by the agent — which is exactly what this
+wave is for; every scripted signal only ever proved the pipeline reached the mixer.
+
+**The plan is now complete: 26 of 26 boxes.** Everything since (icon and splash from
+kefi-2/kefi-4.png, the six-colour palette, row artwork, the Folders tab, swipe between
+tabs, the home-screen widget, and the three device-reported fixes) is work beyond the plan,
+committed and covered by `npm run qa` — 38 checks.
