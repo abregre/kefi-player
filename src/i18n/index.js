@@ -1,4 +1,4 @@
-import { readonly, ref } from 'vue'
+import { readonly, ref, watch } from 'vue'
 import { Preferences } from '@capacitor/preferences'
 import el from './el'
 import en from './en'
@@ -52,6 +52,21 @@ export async function initLocale() {
     // No storage (or a browser with it blocked): the detected locale stands.
   }
 }
+
+/*
+ * Tells the engine which language it is casing. It matters for exactly one thing here, and
+ * that thing is visible on every screen: CSS `text-transform: uppercase` on Greek keeps the
+ * tonos ("ΓΛΏΣΣΑ") unless the element's language says Greek, and correct Greek drops accents
+ * in capitals ("ΓΛΩΣΣΑ"). With this, the dictionaries can stay correctly spelled instead of
+ * being written without accents to work around the rendering.
+ */
+watch(
+  locale,
+  (code) => {
+    document.documentElement.lang = code
+  },
+  { immediate: true },
+)
 
 export function useI18n() {
   /** @param {'el' | 'en'} code */

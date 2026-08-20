@@ -4,10 +4,25 @@
     #3F51B5 and friends). These names are read by AppTheme in styles.xml and reach
     the few pieces of native chrome a Capacitor app still shows — most visibly the
     text-selection handles inside the WebView, which would otherwise be indigo in a
-    green app. Values are from the app palette; keep them in step with src/style.css.
+    green app.
+
+    The widget_* colours are the same design tokens as src/style.css, restated for
+    RemoteViews, which cannot read CSS. This file is the LIGHT theme; values-night/
+    carries the dark one. A widget lives on the launcher, so it follows the SYSTEM
+    theme rather than the app's own language/appearance settings.
+
+    Keep all of these in step with src/style.css.
 -->
 <resources>
     <color name="colorPrimary">#006B3C</color>
     <color name="colorPrimaryDark">#080A0A</color>
     <color name="colorAccent">#00C853</color>
+
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_border">#CBDCD1</color>
+    <color name="widget_art_bg">#E8F1EB</color>
+    <color name="widget_text">#080A0A</color>
+    <color name="widget_muted">#55635C</color>
+    <color name="widget_accent">#006B3C</color>
+    <color name="widget_on_accent">#FFFFFF</color>
 </resources>

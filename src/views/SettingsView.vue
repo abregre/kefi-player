@@ -1,7 +1,26 @@
 <script setup>
+import { ref } from 'vue'
 import { LOCALES, useI18n } from '../i18n'
+import { Player } from '../plugins/player'
 
 const { locale, t, setLocale } = useI18n()
+
+/*
+ * An app cannot place its own widget; it can only ASK the launcher to
+ * (`requestPinAppWidget`), and some launchers refuse. There is no way to find out except by
+ * asking, so the offer is always shown and a refusal turns into a line explaining the long
+ * way round — the launcher's own widget list, which always works.
+ */
+const pinRefused = ref(false)
+
+async function addWidget() {
+  try {
+    const { supported } = await Player.requestWidgetPin()
+    pinRefused.value = !supported
+  } catch {
+    pinRefused.value = true
+  }
+}
 </script>
 
 <template>
@@ -28,6 +47,19 @@ const { locale, t, setLocale } = useI18n()
         </span>
       </button>
     </div>
+
+    <h2 class="section-title">{{ t('settings.widget') }}</h2>
+    <div class="card">
+      <button type="button" class="option" @click="addWidget">
+        <span>{{ t('settings.widget.add') }}</span>
+        <span class="tick" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </span>
+      </button>
+    </div>
+    <p v-if="pinRefused" class="note">{{ t('settings.widget.manual') }}</p>
 
     <h2 class="section-title">{{ t('settings.about') }}</h2>
     <div class="card about">
@@ -98,6 +130,13 @@ const { locale, t, setLocale } = useI18n()
   display: block;
   width: 1.1rem;
   height: 1.1rem;
+}
+
+.note {
+  margin: 0.5rem 0.2rem 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .about {

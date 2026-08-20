@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="playback_channel_name">Παίζει τώρα</string>
+    <string name="widget_description">Το τρέχον τραγούδι με αναπαραγωγή, προηγούμενο και επόμενο.</string>
+    <string name="widget_idle">Δεν παίζει τίποτα</string>
+    <string name="widget_play">Αναπαραγωγή</string>
+    <string name="widget_pause">Παύση</string>
+    <string name="widget_next">Επόμενο</string>
+    <string name="widget_previous">Προηγούμενο</string>
+</resources>

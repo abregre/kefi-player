@@ -82,6 +82,23 @@ object PlaybackStateStore {
      * stored uris resolve. Runs entirely on [Dispatchers.IO] — safe to call from
      * [PlaybackService.onCreate] (main thread) without blocking it.
      */
+    /**
+     * The uri of whatever was current when the app was last alive, without touching the
+     * player. The widget renders from this when the process starts cold (a reboot, or after
+     * the service stopped): it can show the last track, paused, instead of an empty strip.
+     */
+    suspend fun peekCurrentUri(context: Context): String? = withContext(Dispatchers.IO) {
+        val p = prefs(context)
+        val queueJson = p.getString(KEY_QUEUE, null) ?: return@withContext null
+        try {
+            val array = JSONArray(queueJson)
+            val index = p.getInt(KEY_INDEX, 0).coerceIn(0, (array.length() - 1).coerceAtLeast(0))
+            if (array.length() == 0) null else array.getString(index)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
     suspend fun restore(context: Context): RestoredQueue? = withContext(Dispatchers.IO) {
         val p = prefs(context)
         val queueJson = p.getString(KEY_QUEUE, null) ?: return@withContext null

@@ -309,6 +309,19 @@ object TrackSource {
         dataUrl
     }
 
+    /**
+     * Artwork as a [Bitmap] for a track uri. The widget needs pixels, not the base64 data
+     * URL [getArtwork] hands the WebView — `RemoteViews` can only take a bitmap, and
+     * round-tripping through base64 to get one back would be silly.
+     */
+    suspend fun artworkBitmap(context: Context, uri: String): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            loadArtworkBitmap(context, Uri.parse(uri))
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
     private fun loadArtworkBitmap(context: Context, trackUri: Uri): Bitmap? {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {

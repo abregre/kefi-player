@@ -29,11 +29,14 @@ project `../ytmp3` is TypeScript, this one is not.
   or its renderer killed outright — and the UI repopulates from a live native
   snapshot while the audio never stops. Queue, index, position, shuffle and repeat
   are persisted and restored **paused** after process death, never auto-playing.
+- **A home-screen widget** (4×1) with artwork, the current track and previous / play-pause
+  / next. It follows the same state the app does, shows the last-played track — paused —
+  when nothing is running, and can start playback from cold. Settings offers to add it.
 - **Degrades instead of stalling.** A deleted or unreadable file is skipped, reported
   in the UI, and the queue moves on.
 
 Deliberately **not** in this version: playlists and favourites, sleep timer, playback
-speed, a home-screen widget, an equalizer, streaming or any network use at all.
+speed, an equalizer, streaming or any network use at all.
 
 ## Requirements
 
@@ -81,7 +84,7 @@ The Library screen renders three distinct states rather than a blank list:
 
 ```bash
 npm run fixtures          # push + index 3 audio fixtures (in 2 folders) + 2 unplayable baits
-npm run qa                # 37 scripted checks; exits non-zero on any FAIL
+npm run qa                # 38 scripted checks; exits non-zero on any FAIL
 bash scripts/qa-playback.sh 1a2b3c4d   # ...against a specific adb serial
 ```
 
@@ -109,7 +112,6 @@ Named here so the next piece of work starts from a written baseline:
 1. **Playlists and favourites** — the first feature that genuinely needs persistence
    beyond `SharedPreferences`; the intended home is Room.
 2. **Sleep timer and playback speed.**
-3. **Home-screen widget.**
 
 An equalizer was considered and explicitly declined.
 

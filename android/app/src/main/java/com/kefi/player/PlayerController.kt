@@ -255,7 +255,13 @@ object PlayerController {
 
     private fun broadcastState() {
         val current = controller ?: return
-        onState?.invoke(current.toSnapshot())
+        val snapshot = current.toSnapshot()
+        onState?.invoke(snapshot)
+        // The home-screen widget follows the same state changes the WebView does, and for
+        // the same reason: it is a second view of one player, not a second player. Cheap —
+        // this fires on state CHANGES only, and the widget bails immediately when no widget
+        // is placed.
+        PlayerWidget.onPlayerState(App.instance, snapshot)
     }
 
     /**

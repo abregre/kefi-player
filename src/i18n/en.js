@@ -60,6 +60,10 @@ export default {
   'settings.language': 'Language',
   'settings.language.el': 'Ελληνικά',
   'settings.language.en': 'English',
+  'settings.widget': 'Home screen',
+  'settings.widget.add': 'Add the player widget',
+  'settings.widget.manual':
+    'This launcher will not add widgets for an app. Add it from the launcher\u2019s own widget list instead: long-press the home screen, tap Widgets, then Kefi Player.',
   'settings.about': 'About',
   'settings.about.body': 'A local music player. No accounts, no network, no database.',
 

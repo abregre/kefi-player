@@ -1516,3 +1516,51 @@ green/yellow come through automatically (verified by pixel-sampling both themes)
   existing count identical (3 songs, 3 albums, 2 artists) while making the grouping testable.
   `npm run qa` asserts `listTracks` reports exactly 2 folders including `kefi-qa/vol2`
   — 37 checks, all green, plus the full UI sweep.
+
+## Home-screen widget (2026-08-20) — the roadmap item, built
+NEW `PlayerWidget.kt` + `res/layout/player_widget.xml`, `res/xml/player_widget_info.xml`,
+five vector drawables, three shapes, `values(-night)/colors.xml` widget tokens,
+`values(-el)/strings.xml`, and a manifest receiver. 4×1: artwork, title, artist,
+previous / play-pause / next; tapping the body opens the app.
+
+**The design constraint that shaped everything: a widget click runs in the background.**
+- **Play/pause goes through Media3's `MediaButtonReceiver`** (a real `ACTION_MEDIA_BUTTON`
+  broadcast with `KEYCODE_MEDIA_PLAY_PAUSE`). That is the one path allowed to START the
+  service from cold — the platform grants a temporary FGS allowlist for media buttons — and
+  it is the same path the notification uses.
+- **Next/previous CANNOT use it.** Read the source: since API 26 `MediaButtonReceiver`
+  deliberately ignores every key that is not play/play-pause, because a service started for
+  a non-play command never promotes itself to the foreground and the system kills it with
+  `ForegroundServiceDidNotStartInTimeException`. They go to our own receiver instead, which
+  calls `PlayerController` — that BINDS to the session rather than starting a foreground
+  service, so it is safe from a widget tap in any state and is simply a no-op when there is
+  no queue.
+- Updates are pushed from `PlayerController.broadcastState()`, i.e. the same state changes
+  the WebView gets, and `refresh()` returns immediately when no widget is placed — not a
+  single bitmap is decoded for a widget nobody added. `updatePeriodMillis=0`: nothing is
+  polled.
+- Cold start (reboot, or after the service stopped) renders from `PlaybackStateStore`'s new
+  `peekCurrentUri` plus `TrackSource.mediaItemsFor` — the last track, paused, instead of an
+  empty strip. `TrackSource.artworkBitmap` was added because `RemoteViews` needs pixels, not
+  the base64 data URL the WebView gets.
+- Colours are restated in `values(-night)/colors.xml`: a widget is rendered by the LAUNCHER,
+  so it follows the system theme and cannot read the app's CSS. Same for strings, which
+  follow the DEVICE locale (`values-el/`), not the app's language setting.
+- **NEW plugin method `requestWidgetPin`** + a Settings row: an app cannot place its own
+  widget, it can only ask (`requestPinAppWidget`). Worth having on its own merits, and it
+  is also the only reliable way to place the widget in QA — dragging it out of the
+  launcher's picker with `input draganddrop` worked once and then stopped working.
+- QA: `npm run qa` (now 38 checks) asserts the provider is registered with the system —
+  the part that silently breaks on a manifest/resource mistake. Placement and button
+  behaviour were verified by hand on the emulator: pin dialog → "4 × 1" with our
+  description; play from cold → `state=PLAYING(3)`; next → `Zeibekiko`; previous within 3s →
+  back a track (Media3's `seekToPrevious` restart-vs-skip threshold, T10); pause → the
+  widget's own icon flips to play.
+
+## Greek uppercase: set the document language, do not strip the accents
+Section headings use `text-transform: uppercase`, and Greek capitals take NO tonos
+(«ΓΛΩΣΣΑ», not «ΓΛΏΣΣΑ»). The engine only applies that rule when it knows the text is Greek,
+and `index.html` says `lang="en"`. The workaround of writing the dictionary without accents
+(«Γλωσσα») breaks the actual spelling everywhere else, including for screen readers.
+Fix: `src/i18n/index.js` watches the locale and sets `document.documentElement.lang`.
+Verified on device — the source string is «Γλώσσα» and it renders «ΓΛΩΣΣΑ».

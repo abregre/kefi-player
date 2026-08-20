@@ -176,6 +176,11 @@ export class PlayerWeb extends WebPlugin {
     return { granted: true, state: 'granted' }
   }
 
+  async requestWidgetPin() {
+    console.info('[PlayerWeb] requestWidgetPin is a no-op in the browser')
+    return { supported: false }
+  }
+
   async openAppSettings() {
     console.info('[PlayerWeb] openAppSettings is a no-op in the browser')
   }

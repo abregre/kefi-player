@@ -479,6 +479,20 @@ NOTIFICATIONS=$("${EMU[@]}" shell dumpsys notification --noredact | grep -c "pkg
 launch_app >/dev/null 2>&1
 sleep 2
 
+# --- home-screen widget ----------------------------------------------------------
+
+step "Widget — provider registration"
+
+# Placing a widget needs a launcher and cannot be scripted on this build (there is no
+# `cmd appwidget`), so what is asserted here is the part that silently breaks on a manifest
+# or resource mistake: the system knows about the provider at all, with its declared size.
+WIDGET=$("${EMU[@]}" shell dumpsys appwidget | grep -A2 "com.kefi.player/com.kefi.player.PlayerWidget" | head -3)
+if [[ -n "$WIDGET" ]]; then
+  pass "AppWidget provider PlayerWidget is registered with the system"
+else
+  fail "AppWidget provider PlayerWidget is not registered (manifest receiver or provider xml)"
+fi
+
 # --- layout: long names must not widen the app ----------------------------------
 
 step "Layout — a long track name cannot widen the app"

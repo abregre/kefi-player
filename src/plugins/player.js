@@ -75,6 +75,9 @@ import { registerPlugin } from '@capacitor/core'
  *   (`READ_MEDIA_AUDIO` on API 33+, `READ_EXTERNAL_STORAGE` below).
  * @property {() => Promise<PlayerPermissionResult>} requestAudioPermission
  *   Prompts the user if not already granted, then resolves with the resulting state.
+ * @property {() => Promise<{ supported: boolean }>} requestWidgetPin
+ *   Asks the launcher to add the home-screen widget. Resolves `{ supported: false }` on a
+ *   launcher that cannot pin widgets, which is the UI's cue to hide the offer.
  * @property {() => Promise<void>} openAppSettings
  *   Opens this app's page in system Settings — the only route back once the audio
  *   permission is `denied`, since Android then refuses to show the dialog again.

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark counterpart of values/colors.xml; same tokens as src/style.css's :root. -->
+<resources>
+    <color name="widget_bg">#101413</color>
+    <color name="widget_border">#26332E</color>
+    <color name="widget_art_bg">#182220</color>
+    <color name="widget_text">#F2F5F3</color>
+    <color name="widget_muted">#9BAAA2</color>
+    <color name="widget_accent">#00C853</color>
+    <color name="widget_on_accent">#080A0A</color>
+</resources>

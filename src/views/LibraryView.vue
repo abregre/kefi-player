@@ -302,7 +302,6 @@ function playGroup(group) {
    segment is its own affordance, and swiping the page switches tabs anyway. */
 .segmented {
   display: flex;
-  gap: 0.3rem;
   margin-top: 0.7rem;
   padding: 0.2rem;
   background: var(--surface-1);
@@ -318,7 +317,7 @@ function playGroup(group) {
 }
 
 .segment {
-  flex: 0 0 auto;
+  flex: 1 0 auto;
   padding: 0.4rem 0.75rem;
   border: 0;
   border-radius: 999px;

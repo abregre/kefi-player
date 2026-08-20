@@ -56,10 +56,14 @@ export default {
   'player.openNowPlaying': 'Άνοιγμα αναπαραγωγής',
 
   'settings.title': 'Ρυθμίσεις',
-  'settings.language': 'Γλωσσα',
+  'settings.language': 'Γλώσσα',
   'settings.language.el': 'Ελληνικά',
   'settings.language.en': 'English',
-  'settings.about': 'Σχετικα',
+  'settings.widget': 'Αρχική οθόνη',
+  'settings.widget.add': 'Προσθήκη widget',
+  'settings.widget.manual':
+    'Αυτό το launcher δεν προσθέτει widget εκ μέρους της εφαρμογής. Πρόσθεσέ το από τη λίστα widget του launcher: παρατεταμένο πάτημα στην αρχική οθόνη, μετά «Widgets» και «Kefi Player».',
+  'settings.about': 'Σχετικά',
   'settings.about.body': 'Χωρίς λογαριασμούς, χωρίς δίκτυο.',
 
   'error.trackUnavailable': 'Το αρχείο δεν μπόρεσε να παίξει, το προσπεράσαμε.',

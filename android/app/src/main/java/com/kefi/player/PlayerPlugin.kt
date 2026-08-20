@@ -1,6 +1,8 @@
 package com.kefi.player
 
 import android.Manifest
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -334,6 +336,24 @@ class PlayerPlugin : Plugin() {
      * `FLAG_ACTIVITY_NEW_TASK` because the Settings activity is started from an application
      * context, not from an Activity task.
      */
+    /**
+     * Asks the launcher to add the home-screen widget, which is the only supported way for
+     * an app to place one (`AppWidgetManager.requestPinAppWidget`, API 26+). The launcher
+     * shows its own confirmation; there is no callback worth waiting for, so this resolves
+     * with whether the request could be made at all — some launchers do not support pinning,
+     * and the UI hides the button when `supported` is false.
+     */
+    @PluginMethod
+    fun requestWidgetPin(call: PluginCall) {
+        val manager = AppWidgetManager.getInstance(context)
+        val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.isRequestPinAppWidgetSupported
+        if (supported) {
+            manager.requestPinAppWidget(ComponentName(context, PlayerWidget::class.java), null, null)
+        }
+        call.resolve(JSObject().put("supported", supported))
+    }
+
     @PluginMethod
     fun openAppSettings(call: PluginCall) {
         val intent = Intent(
