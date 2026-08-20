@@ -1388,3 +1388,29 @@ All 15 numbered criteria verified, with one correction recorded in the plan itse
   (`types=0x00000002`), never the manifest word. Checked instead: that line with bit `0x2`
   set (runtime) **and** `foregroundServiceType="mediaPlayback"` in the manifest (declaration).
   Both green. This is the same trap that produced a false FAIL in T20's first run.
+
+## App icon and splash from `~/Pictures/kefi-2.png` (2026-08-20)
+Source: 1254x1254 RGBA, a circular neon headphone/vinyl logo with **transparent corners**.
+`npm run icons ~/Pictures/kefi-2.png` now produces everything; three things had to be fixed in
+`scripts/make-icons.py` first, all of them wrong for this kind of artwork:
+- **`FOREGROUND_SCALE` was 0.76, which is a bet, not a guarantee.** An adaptive layer is 108dp
+  and only the central **72dp** is visible under every mask, so 0.76 (82dp) let a tight circular
+  mask eat the logo's outer neon ring. Now exactly `72 / 108`.
+- **`sample_background()` returned black when every probe hit transparency**, which is exactly
+  what a pre-cut round logo looks like at the corners. Now falls back to `BRAND_BG`. (This
+  artwork actually has opaque glow at some probe points, so the adaptive background sampled to
+  `#152544`, a dark navy that suits it.)
+- **Android 12+ ignores `drawable*/splash.png` entirely.** It composes the splash itself from
+  `windowSplashScreenBackground` + `windowSplashScreenAnimatedIcon`, and with neither set it
+  falls back to the launcher icon over the theme's window background — which is what this app
+  shipped. Added NEW `drawable-nodpi/splash_icon.png` (1152px canvas = 288dp at 4x, artwork in
+  the inner 2/3 per the platform's spec for an icon with no background of its own) plus a
+  generated `splash_background` colour, both wired up in `res/values/styles.xml`. The legacy
+  bitmaps stay for API ≤ 30. No `postSplashScreenTheme` needed: Capacitor's `BridgeActivity`
+  already calls `setTheme(AppTheme_NoActionBar)` in `onCreate`.
+- A `pngquant` pass (optional, skipped when the tool is absent) was added because this artwork
+  is a photorealistic gradient: the generated PNGs came to ~2.0MB, of which the splash icon
+  alone was 730KB. Now ~0.8MB total, with no difference visible at display size — verified by
+  re-screenshotting the splash after quantisation.
+Verified on device: the Android 12+ splash shows the logo centred on `#14100F`; the launcher
+drawer shows it filling the circular mask; `npm run qa` still 35/35.

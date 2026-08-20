@@ -8,13 +8,19 @@ Produces, for every density:
   - ic_launcher_round.png    legacy round icon
   - ic_launcher_foreground.png  adaptive foreground layer
 
+plus:
+  - drawable-nodpi/splash_icon.png   the Android 12+ splash icon
+  - drawable*/splash.png             the legacy (<= Android 11) splash bitmaps
+
 and rewrites values/ic_launcher_background.xml with a colour sampled from the
 source, so the adaptive background matches the artwork wherever a launcher's
 mask crops a corner.
 
 Requires Pillow (`pip install --user Pillow`).
 """
+import shutil
 import statistics
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,17 +31,27 @@ RES = Path(__file__).resolve().parent.parent / "android/app/src/main/res"
 LEGACY = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 ADAPTIVE = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
 
-# An adaptive layer is 108dp but only the central 72dp is guaranteed visible.
-# Pre-shaped artwork is inset to this fraction so the mask can never clip it.
-FOREGROUND_SCALE = 0.76
+# An adaptive layer is 108dp but only the central 72dp is guaranteed visible under
+# every launcher mask, so the artwork is inset to exactly that: 72/108. Anything
+# larger is a bet on the mask being generous, which a circular logo loses — its
+# outer ring is the first thing a tight circular mask eats.
+FOREGROUND_SCALE = 72 / 108
 ROUND_SCALE = 0.92
 
 # The launch screen paints this behind the logo. Keep it equal to --bg in
 # src/style.css, or the app flashes a different colour before the WebView paints.
 BRAND_BG = (0x14, 0x10, 0x0F)
 
-# Fraction of the shorter splash edge taken up by the logo.
+# Fraction of the shorter splash edge taken up by the logo (legacy splash bitmaps).
 SPLASH_LOGO_SCALE = 0.28
+
+# Android 12+ ignores the splash bitmaps entirely and composes its own splash from
+# windowSplashScreenAnimatedIcon over windowSplashScreenBackground (see
+# res/values/styles.xml). For an icon WITHOUT its own background the platform asks for
+# a 288dp canvas whose artwork lives in the inner 192dp — the same 2/3 as an adaptive
+# icon. 1152px is that canvas at 4x, which covers every density from one nodpi asset.
+SPLASH_ICON_CANVAS = 1152
+SPLASH_ICON_SCALE = 2 / 3
 
 # Points that should land on the artwork's own background rather than on any
 # foreground detail.
@@ -53,7 +69,10 @@ def sample_background(art: Image.Image) -> tuple[int, int, int]:
         if pixel[3] > 200:
             seen.append(pixel[:3])
     if not seen:
-        return (0, 0, 0)
+        # Every probe landed on transparency, which is what a pre-cut logo (round or
+        # otherwise) looks like at the corners. Black would be an arbitrary choice; the
+        # brand background is the one that matches the rest of the app.
+        return BRAND_BG
     return tuple(int(statistics.median(c[i] for c in seen)) for i in range(3))
 
 
@@ -86,6 +105,43 @@ def write_splashes(art: Image.Image) -> int:
     return written
 
 
+def compress(paths: list[Path]) -> str:
+    """Quantises the generated PNGs in place with pngquant, if it is installed.
+
+    Worth doing: this artwork is a neon gradient, so the splash bitmaps and the 1152px
+    splash icon land at ~180KB and ~730KB straight out of Pillow — about 1.5MB of the APK
+    for images shown for a few hundred milliseconds. pngquant cuts that by ~70% with no
+    difference visible at display size. Optional on purpose: a missing tool must not fail
+    an icon regeneration, it just leaves bigger files behind.
+    """
+    tool = shutil.which("pngquant")
+    if tool is None:
+        return "pngquant not installed — PNGs left unoptimised"
+    before = after = 0
+    for path in paths:
+        size = path.stat().st_size
+        before += size
+        done = subprocess.run(
+            [tool, "--quality=60-95", "--speed", "1", "--force", "--output", str(path), str(path)],
+            capture_output=True,
+        )
+        # pngquant exits 98/99 when it cannot hit the quality floor; the file is then
+        # untouched, which is the right outcome — keep the lossless original.
+        after += path.stat().st_size
+        if done.returncode not in (0, 98, 99):
+            return f"pngquant failed on {path.name}: {done.stderr.decode().strip()}"
+    return f"compressed {len(paths)} PNGs: {before // 1024}KB -> {after // 1024}KB"
+
+
+def write_splash_icon(art: Image.Image) -> Path:
+    """Writes the Android 12+ splash icon: logo centred in the inner 2/3, transparent."""
+    out = RES / "drawable-nodpi"
+    out.mkdir(exist_ok=True)
+    path = out / "splash_icon.png"
+    centred(art, SPLASH_ICON_CANVAS, SPLASH_ICON_SCALE).save(path)
+    return path
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
@@ -113,12 +169,23 @@ def main() -> int:
             RES / f"mipmap-{density}" / "ic_launcher_foreground.png"
         )
 
+    # Both colours live in one generated file so a re-run can never leave the launcher
+    # and the splash disagreeing about the brand background.
     (RES / "values/ic_launcher_background.xml").write_text(
         '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
-        '    <color name="ic_launcher_background">#%02X%02X%02X</color>\n</resources>\n' % bg
+        '    <color name="ic_launcher_background">#%02X%02X%02X</color>\n'
+        '    <color name="splash_background">#%02X%02X%02X</color>\n</resources>\n'
+        % (bg + BRAND_BG)
     )
     print(f"wrote icons for {len(LEGACY)} densities")
-    print(f"wrote {write_splashes(art)} splash screens")
+    print(f"wrote {write_splashes(art)} legacy splash screens")
+    splash_icon = write_splash_icon(art)
+    print(f"wrote {splash_icon.relative_to(RES)} for the Android 12+ splash")
+    print(
+        compress(
+            [splash_icon, *sorted(RES.glob("drawable*/splash.png")), *sorted(RES.glob("mipmap-*/*.png"))]
+        )
+    )
     return 0
 
 
