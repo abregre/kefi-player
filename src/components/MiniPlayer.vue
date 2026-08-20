@@ -63,7 +63,7 @@ function toggle() {
         :aria-label="t('player.openNowPlaying')"
         @click="router.push('/now-playing')"
       >
-        <span class="art">
+        <span class="art" :class="{ spinning: player.isPlaying.value }">
           <img v-if="cover" class="art-image" :src="cover" alt="" />
           <span v-else class="art-placeholder" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -138,13 +138,43 @@ function toggle() {
   text-align: left;
 }
 
+/*
+ * A round cover in the strip, and it turns while the music plays — the mini-player is the
+ * one place in the app that is always on screen, so it is where a sign of life belongs.
+ * Only here: the list rows keep square thumbnails (a grid of spinning discs would be
+ * noise) and Now Playing has the seek bar to say the same thing.
+ *
+ * Paused via `animation-play-state`, not by removing the animation: the disc holds the
+ * angle it stopped at and picks up from there, the way a record does. Removing it would
+ * snap back to 0deg on every pause.
+ */
 .art {
   flex-shrink: 0;
   width: 2.5rem;
   height: 2.5rem;
-    border-radius: 50%;
+  border-radius: 50%;
   overflow: hidden;
   background: var(--surface-2);
+  animation: spin 6s linear infinite;
+  animation-play-state: paused;
+}
+
+.art.spinning {
+  animation-play-state: running;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Vestibular disorders are a real accessibility need, and this rotation is decoration:
+   the play/pause icon already carries the state. */
+@media (prefers-reduced-motion: reduce) {
+  .art {
+    animation: none;
+  }
 }
 
 .art-image {
