@@ -492,7 +492,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     is actually wired; tapping row 2 makes `dumpsys media_session` report `Zeibekiko` with
     `state=3`.
 
-- [ ] **T16: Albums and Artists groupings with artwork**
+- [x] **T16: Albums and Artists groupings with artwork**
   - Files: `src/views/LibraryView.vue` (segmented control Songs | Albums | Artists); NEW
     `src/components/AlbumGrid.vue`, `src/components/ArtistList.vue`.
   - Pure in-memory `groupBy` over the same `listTracks` result — **no second native call**.

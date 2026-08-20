@@ -18,6 +18,17 @@ const status = ref('idle')
 const errorMessage = ref('')
 /** Free-text search, applied in memory over `tracks`. */
 const query = ref('')
+/**
+ * Artwork by track id: a base64 data URL, or `null` for "asked, and this track has
+ * none" — the distinction matters, because a plain object miss means "not asked yet"
+ * and drives the lazy fetch, while a stored `null` must NOT trigger a retry.
+ * A plain object rather than a Map so Vue's reactivity sees writes without a
+ * `ref(new Map())` reassignment dance.
+ * @type {import('vue').Ref<Record<number, string | null>>}
+ */
+const artwork = ref({})
+/** Track ids with an in-flight `getArtwork` call, so a re-render cannot double-fetch. */
+const artworkPending = new Set()
 
 let loadPromise = null
 
@@ -116,8 +127,66 @@ const visibleTracks = computed(() => {
   )
 })
 
+/**
+ * Groups the visible tracks by one of their own fields. Pure in-memory work over the
+ * single `listTracks` result — no second native call, no database (Must NOT Have).
+ * Grouping follows the SEARCH result, not the whole library, so a query narrows all
+ * three tabs consistently instead of showing albums that contain no matching song.
+ * @param {'album' | 'artist'} field
+ * @param {string} fallbackKey Bucket for tracks with that field empty.
+ */
+function groupBy(field, fallbackKey) {
+  /** @type {Map<string, { key: string, name: string | null, tracks: PlayerTrack[] }>} */
+  const groups = new Map()
+  for (const track of visibleTracks.value) {
+    const name = track[field] || null
+    const key = name ?? fallbackKey
+    if (!groups.has(key)) groups.set(key, { key, name, tracks: [] })
+    groups.get(key).tracks.push(track)
+  }
+  for (const group of groups.values()) {
+    // Inside an album, track order is the album's own order; title only breaks ties
+    // (and covers files with no track number at all, like the QA fixtures).
+    group.tracks.sort(
+      (a, b) =>
+        (a.trackNumber ?? Number.MAX_SAFE_INTEGER) - (b.trackNumber ?? Number.MAX_SAFE_INTEGER) ||
+        collator.compare(a.title, b.title),
+    )
+  }
+  return [...groups.values()].sort((a, b) => collator.compare(a.key, b.key))
+}
+
+const albums = computed(() => groupBy('album', ''))
+const artists = computed(() => groupBy('artist', ''))
+
+/**
+ * Fetches artwork for one track at most once per process. Called by album cells when
+ * they scroll into view (T16) rather than on mount, because artwork crosses the bridge
+ * as a base64 JPEG and a large library would otherwise pull hundreds of them for cells
+ * nobody looked at.
+ * @param {number} trackId
+ */
+async function loadArtwork(trackId) {
+  if (trackId in artwork.value || artworkPending.has(trackId)) return
+  artworkPending.add(trackId)
+  try {
+    const { dataUrl } = await Player.getArtwork({ trackId })
+    artwork.value = { ...artwork.value, [trackId]: dataUrl ?? null }
+  } catch {
+    // A track whose artwork cannot be read is indistinguishable, for the UI, from one
+    // that has none: both render the placeholder. Cached as null so it is asked once.
+    artwork.value = { ...artwork.value, [trackId]: null }
+  } finally {
+    artworkPending.delete(trackId)
+  }
+}
+
 export function useLibrary() {
   return {
+    albums,
+    artists,
+    artwork: readonly(artwork),
+    loadArtwork,
     tracks: readonly(tracks),
     status: readonly(status),
     errorMessage: readonly(errorMessage),

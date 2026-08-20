@@ -1,15 +1,23 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
 import TrackRow from '../components/TrackRow.vue'
+import AlbumGrid from '../components/AlbumGrid.vue'
+import ArtistList from '../components/ArtistList.vue'
 
-// TODO(T16): Songs | Albums | Artists segmented control.
 // TODO(T19): the permission / denied / empty states (status is already tracked).
 const { t } = useI18n()
-const { status, query, visibleTracks, load } = useLibrary()
+const { status, query, visibleTracks, albums, artists, load } = useLibrary()
 const player = usePlayer()
+
+/**
+ * Module level on purpose: leaving for Now Playing and coming back should land on the
+ * grouping the user was last looking at, not reset to Songs.
+ */
+const TABS = ['songs', 'albums', 'artists']
+const tab = ref('songs')
 
 onMounted(() => {
   // One MediaStore query per process, shared at module level: coming back to this
@@ -18,6 +26,8 @@ onMounted(() => {
 })
 
 const countLabel = computed(() => {
+  if (tab.value === 'albums') return t('library.count.albums', { count: albums.value.length })
+  if (tab.value === 'artists') return t('library.count.artists', { count: artists.value.length })
   const count = visibleTracks.value.length
   return count === 1 ? t('library.count.song') : t('library.count.songs', { count })
 })
@@ -32,6 +42,16 @@ function playFrom(track) {
   const list = visibleTracks.value
   const startIndex = list.findIndex((candidate) => candidate.id === track.id)
   player.setQueue({ uris: list.map((item) => item.uri), startIndex: Math.max(0, startIndex) })
+}
+
+/**
+ * Album and artist cells play their own group, in the group's own order — the album
+ * from its first track, an artist from the top of their list.
+ * @param {{ tracks: import('../plugins/player').PlayerTrack[] }} group
+ */
+function playGroup(group) {
+  if (group.tracks.length === 0) return
+  player.setQueue({ uris: group.tracks.map((item) => item.uri), startIndex: 0 })
 }
 </script>
 
@@ -62,18 +82,37 @@ function playFrom(track) {
       />
     </div>
 
+    <div class="segmented" role="tablist" :aria-label="t('library.title')">
+      <button
+        v-for="name in TABS"
+        :key="name"
+        type="button"
+        role="tab"
+        class="segment"
+        :class="{ selected: tab === name }"
+        :aria-selected="tab === name"
+        @click="tab = name"
+      >
+        {{ t(`library.tab.${name}`) }}
+      </button>
+    </div>
+
     <p v-if="status === 'loading'" class="hint">{{ t('library.loading') }}</p>
 
-    <ul v-else class="list">
-      <li v-for="track in visibleTracks" :key="track.id">
-        <TrackRow
-          :track="track"
-          :active="player.mediaId.value === track.uri"
-          :playing="player.isPlaying.value && player.mediaId.value === track.uri"
-          @select="playFrom"
-        />
-      </li>
-    </ul>
+    <template v-else>
+      <ul v-if="tab === 'songs'" class="list">
+        <li v-for="track in visibleTracks" :key="track.id">
+          <TrackRow
+            :track="track"
+            :active="player.mediaId.value === track.uri"
+            :playing="player.isPlaying.value && player.mediaId.value === track.uri"
+            @select="playFrom"
+          />
+        </li>
+      </ul>
+      <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
+      <ArtistList v-else :artists="artists" @select="playGroup" />
+    </template>
 
     <div v-if="status === 'ready' && visibleTracks.length === 0 && query" class="notice">
       <p class="notice-title">{{ t('library.noResults.title', { query }) }}</p>
@@ -152,6 +191,31 @@ function playFrom(track) {
    placeholder-driven empty state reads better than styling around it. */
 .search-input::-webkit-search-cancel-button {
   appearance: none;
+}
+
+.segmented {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.7rem;
+  padding: 0.2rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.segment {
+  flex: 1;
+  padding: 0.4rem 0.2rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.segment.selected {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .list {

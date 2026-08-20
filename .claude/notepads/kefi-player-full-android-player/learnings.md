@@ -1177,3 +1177,45 @@ smooth bar with zero extra IPC.
   `Zeibekiko` row → `dumpsys media_session` `state=PLAYING(3)`, `description=Zeibekiko, Nikos
   Alexiou, Kefi Vol 1`, snapshot `queueLength: 3, currentIndex: 2` ✓
   (`/tmp/kefi-songs.png`, `/tmp/kefi-songs-playing.png`).
+
+## T16 — Albums and Artists groupings with artwork (2026-08-20)
+- NEW `src/components/AlbumGrid.vue`, `src/components/ArtistList.vue`; `LibraryView.vue` gained the
+  Songs | Albums | Artists segmented control; `useLibrary.js` gained the `albums`/`artists`
+  computeds and the lazy artwork cache (a `groupBy` in a component would have re-run per render
+  and could not be shared with a future screen).
+- Grouping is over **`visibleTracks`, not all tracks**, so a search narrows all three tabs
+  consistently instead of offering albums whose songs are filtered out. Group keys sort through
+  the same `Intl.Collator('el')`; tracks inside a group sort by `trackNumber` with title as the
+  tie-break (the fixtures have no track numbers at all).
+- Artwork cache is `Record<trackId, string | null>`: **absent means "not asked yet", stored
+  `null` means "asked, has none"** — without that distinction every placeholder cell re-fetches
+  forever. `loadArtwork` is idempotent and de-duped by a pending Set; a fetch that throws caches
+  `null`, because for the UI "unreadable" and "absent" are the same picture.
+- Truly lazy: an `IntersectionObserver` with `rootMargin: '200px'` starts the fetch a screenful
+  early and unobserves each cell after its first hit. Artwork crosses the bridge as base64 JPEG,
+  so fetching on mount would pull the whole library's covers for cells nobody scrolled to.
+- **PLAN DISCREPANCY — the plan's "Albums shows exactly 2 cells" is wrong against its own fixture
+  table, and the actual count is 3.** The fixtures' albums are `Κέφι Vol 1` (f1, Greek), `Kefi
+  Vol 1` (f2, **Latin**) and `Κέφι Vol 2` (f3, Greek) — three distinct names. No collator setting
+  makes Greek `Κέφι` equal Latin `Kefi`: `sensitivity: 'base'` folds case and accents, never
+  scripts. The plan's own QA sentence contradicts its count too ("the `Κέφι Vol 1` cell renders
+  the orange cover while `Kefi Vol 1` renders the placeholder" describes 3 cells). Delivered
+  as 3, which is the correct grouping of the fixture data; the fixtures were NOT changed, since
+  their mixed-script titles are what T15's collation QA rides on. **`Expected groupings: 3
+  songs, 2 albums, 2 artists` in the plan's Fixed constants should read 3 albums.**
+- QA (device): Albums → 3 cells `Κέφι Vol 1`, `Κέφι Vol 2`, `Kefi Vol 1` (Greek before Latin,
+  per the collator), exactly 1 `.art-image` (the orange embedded cover on `Κέφι Vol 1`) and 2
+  token placeholders ✓; Artists → exactly 2 rows, `Δήμητρα Παπαδοπούλου / 2 τραγούδια` and
+  `Nikos Alexiou / 1 τραγούδι` ✓; tapping the `Κέφι Vol 1` cell → `dumpsys media_session`
+  `description=Άσπρη Μέρα, Δήμητρα Παπαδοπούλου, Κέφι Vol 1` ✓
+  (`/tmp/kefi-albums.png`, `/tmp/kefi-artists.png`).
+- **QA TOOLING BUG FOUND AND FIXED — earlier tap coordinates were wrong and a miss looked like a
+  pass.** The WebView's vertical inset on this AVD is **135 device px, not the 63** a 24dp status
+  bar implies (`window.screenY` reports 0 and cannot be used). A tap on the 28px-tall segmented
+  control landed on the search input instead and simply did nothing, which reads exactly like a
+  broken click handler. Diagnosed by installing a capture-phase click listener and comparing the
+  reported `clientY` with the element's own rect. `tapsel.sh` now (a) uses offset 135, and
+  (b) **verifies every tap** — it asks the WebView which element actually received the click and,
+  on a miss, re-derives the offset from the real `clientY` and taps once more, failing loudly if
+  that still misses. Any future UI QA on this project must keep that verification: a silent
+  off-by-N turns a QA step into a no-op that still "passes".
