@@ -526,7 +526,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `shuffle: true`; killing and relaunching the app (T12) leaves the repeat/shuffle toggles
     rendering the restored values.
 
-- [ ] **T19: Empty, loading and permission states**
+- [x] **T19: Empty, loading and permission states**
   - Files: `src/views/LibraryView.vue`.
   - Three distinct states: permission not yet requested (button calling
     `requestAudioPermission()`), permission denied (guidance plus a button opening system

@@ -7,23 +7,40 @@ import TrackRow from '../components/TrackRow.vue'
 import AlbumGrid from '../components/AlbumGrid.vue'
 import ArtistList from '../components/ArtistList.vue'
 
-// TODO(T19): the permission / denied / empty states (status is already tracked).
 const { t } = useI18n()
-const { status, query, visibleTracks, albums, artists, load } = useLibrary()
+const {
+  status,
+  permission,
+  query,
+  tracks,
+  visibleTracks,
+  albums,
+  artists,
+  initialize,
+  reload,
+  requestPermission,
+  openAppSettings,
+} = useLibrary()
 const player = usePlayer()
 
-/**
- * Module level on purpose: leaving for Now Playing and coming back should land on the
- * grouping the user was last looking at, not reset to Songs.
- */
 const TABS = ['songs', 'albums', 'artists']
 const tab = ref('songs')
 
 onMounted(() => {
-  // One MediaStore query per process, shared at module level: coming back to this
-  // tab re-renders from memory instead of re-querying.
-  load()
+  // Resolves the permission first, then queries MediaStore only if it is granted —
+  // both idempotent, so returning to this tab costs nothing.
+  initialize()
 })
+
+/**
+ * `prompt` and `prompt-with-rationale` both mean Android will still show the dialog, so
+ * both get the button that asks. Only `denied` is a dead end that needs system settings.
+ */
+const canAsk = computed(
+  () => permission.value === 'prompt' || permission.value === 'prompt-with-rationale',
+)
+const blocked = computed(() => permission.value === 'denied')
+const empty = computed(() => status.value === 'ready' && tracks.value.length === 0)
 
 const countLabel = computed(() => {
   if (tab.value === 'albums') return t('library.count.albums', { count: albums.value.length })
@@ -59,65 +76,92 @@ function playGroup(group) {
   <section class="page">
     <header class="head">
       <h1 class="page-title">{{ t('library.title') }}</h1>
-      <p class="count">{{ countLabel }}</p>
+      <p v-if="!canAsk && !blocked && !empty" class="count">{{ countLabel }}</p>
     </header>
 
-    <div class="search">
-      <span class="search-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <circle cx="10.5" cy="10.5" r="6" />
-          <path d="m15 15 4.5 4.5" />
-        </svg>
-      </span>
-      <input
-        v-model="query"
-        class="search-input"
-        type="search"
-        inputmode="search"
-        autocapitalize="off"
-        autocorrect="off"
-        spellcheck="false"
-        :placeholder="t('library.search')"
-        :aria-label="t('library.search')"
-      />
-    </div>
-
-    <div class="segmented" role="tablist" :aria-label="t('library.title')">
-      <button
-        v-for="name in TABS"
-        :key="name"
-        type="button"
-        role="tab"
-        class="segment"
-        :class="{ selected: tab === name }"
-        :aria-selected="tab === name"
-        @click="tab = name"
-      >
-        {{ t(`library.tab.${name}`) }}
+    <!-- Permission has never been refused for good: offer to ask. -->
+    <div v-if="canAsk" class="state">
+      <p class="state-title">{{ t('permission.ask.title') }}</p>
+      <p class="hint">{{ t('permission.ask.body') }}</p>
+      <button type="button" class="cta" @click="requestPermission()">
+        {{ t('permission.ask.action') }}
       </button>
     </div>
 
-    <p v-if="status === 'loading'" class="hint">{{ t('library.loading') }}</p>
+    <!-- Android will not show the dialog again; only Settings can undo this. -->
+    <div v-else-if="blocked" class="state">
+      <p class="state-title">{{ t('permission.denied.title') }}</p>
+      <p class="hint">{{ t('permission.denied.body') }}</p>
+      <button type="button" class="cta" @click="openAppSettings()">
+        {{ t('permission.denied.action') }}
+      </button>
+    </div>
+
+    <!-- Permission granted, MediaStore simply has no audio. -->
+    <div v-else-if="empty" class="state">
+      <p class="state-title">{{ t('library.empty.title') }}</p>
+      <p class="hint">{{ t('library.empty.body') }}</p>
+      <button type="button" class="cta" @click="reload()">{{ t('library.empty.action') }}</button>
+    </div>
 
     <template v-else>
-      <ul v-if="tab === 'songs'" class="list">
-        <li v-for="track in visibleTracks" :key="track.id">
-          <TrackRow
-            :track="track"
-            :active="player.mediaId.value === track.uri"
-            :playing="player.isPlaying.value && player.mediaId.value === track.uri"
-            @select="playFrom"
-          />
-        </li>
-      </ul>
-      <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
-      <ArtistList v-else :artists="artists" @select="playGroup" />
-    </template>
+      <div class="search">
+        <span class="search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="10.5" cy="10.5" r="6" />
+            <path d="m15 15 4.5 4.5" />
+          </svg>
+        </span>
+        <input
+          v-model="query"
+          class="search-input"
+          type="search"
+          inputmode="search"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          :placeholder="t('library.search')"
+          :aria-label="t('library.search')"
+        />
+      </div>
 
-    <div v-if="status === 'ready' && visibleTracks.length === 0 && query" class="notice">
-      <p class="notice-title">{{ t('library.noResults.title', { query }) }}</p>
-      <p class="hint">{{ t('library.noResults.body') }}</p>
-    </div>
+      <div class="segmented" role="tablist" :aria-label="t('library.title')">
+        <button
+          v-for="name in TABS"
+          :key="name"
+          type="button"
+          role="tab"
+          class="segment"
+          :class="{ selected: tab === name }"
+          :aria-selected="tab === name"
+          @click="tab = name"
+        >
+          {{ t(`library.tab.${name}`) }}
+        </button>
+      </div>
+
+      <p v-if="status === 'loading'" class="hint loading">{{ t('library.loading') }}</p>
+
+      <template v-else>
+        <ul v-if="tab === 'songs'" class="list">
+          <li v-for="track in visibleTracks" :key="track.id">
+            <TrackRow
+              :track="track"
+              :active="player.mediaId.value === track.uri"
+              :playing="player.isPlaying.value && player.mediaId.value === track.uri"
+              @select="playFrom"
+            />
+          </li>
+        </ul>
+        <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
+        <ArtistList v-else :artists="artists" @select="playGroup" />
+      </template>
+
+      <div v-if="status === 'ready' && visibleTracks.length === 0 && query" class="notice">
+        <p class="notice-title">{{ t('library.noResults.title', { query }) }}</p>
+        <p class="hint">{{ t('library.noResults.body') }}</p>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -229,6 +273,39 @@ function playGroup(group) {
   color: var(--text-muted);
   font-size: 0.85rem;
   line-height: 1.45;
+}
+
+.loading {
+  margin-top: 1rem;
+}
+
+/* One shape for all three of permission-ask / permission-denied / nothing-found: they
+   are the same kind of moment — the library cannot show a list, and the user needs one
+   thing to do about it. */
+.state {
+  margin-top: 2rem;
+  padding: 1.1rem;
+  text-align: center;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+}
+
+.state-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.3;
+}
+
+.cta {
+  margin-top: 0.9rem;
+  padding: 0.6rem 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.9rem;
 }
 
 .notice {

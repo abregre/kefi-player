@@ -32,6 +32,10 @@ import { registerPlugin } from '@capacitor/core'
 /**
  * @typedef {Object} PlayerPermissionResult
  * @property {boolean} granted
+ * @property {'granted' | 'denied' | 'prompt' | 'prompt-with-rationale'} state
+ *   Capacitor's own permission state. `prompt`/`prompt-with-rationale` mean asking is still
+ *   allowed; `denied` means the system dialog will not appear again and only app settings
+ *   can undo it. `granted: false` alone cannot tell those apart.
  */
 
 /**
@@ -68,6 +72,9 @@ import { registerPlugin } from '@capacitor/core'
  *   (`READ_MEDIA_AUDIO` on API 33+, `READ_EXTERNAL_STORAGE` below).
  * @property {() => Promise<PlayerPermissionResult>} requestAudioPermission
  *   Prompts the user if not already granted, then resolves with the resulting state.
+ * @property {() => Promise<void>} openAppSettings
+ *   Opens this app's page in system Settings — the only route back once the audio
+ *   permission is `denied`, since Android then refuses to show the dialog again.
  * @property {(eventName: 'playerState', listener: (event: PlayerSnapshot) => void) => Promise<import('@capacitor/core').PluginListenerHandle>} addListener
  *   Also fires for `eventName: 'trackUnavailable'` with a {@link PlayerTrackUnavailable}
  *   payload: emitted whenever the native controller fails to play a queue item (deleted/

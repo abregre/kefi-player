@@ -1275,3 +1275,45 @@ smooth bar with zero extra IPC.
   `Repeat one` with the badge, native snapshot `"repeatMode":"one"` ✓; `am force-stop` + relaunch
   re-rendered shuffle ON, repeat ONE, `Play` (i.e. paused, per T12) and `0:30` against the native
   `position=30098` ✓ (`/tmp/kefi-nowplaying.png`, `/tmp/kefi-nowplaying-restored.png`).
+
+## T19 — Empty, loading and permission states (2026-08-20)
+- `LibraryView.vue` rewritten with three mutually exclusive states before the list: ask,
+  blocked, empty. `useLibrary` gained `permission`, `checkPermission`, `requestPermission`,
+  `initialize` and `openAppSettings`; `App.vue` gained the skip notice (below).
+- **The three states are distinguishable because Capacitor already exposes Android's own
+  tri-state — no locally-remembered "have we asked yet" flag was needed.**
+  `checkAudioPermission`/`requestAudioPermission` now also return `state`
+  (`getPermissionState(alias).toString()` → `granted | denied | prompt |
+  prompt-with-rationale`). `prompt` and `prompt-with-rationale` both mean the system dialog
+  can still appear, so both render the ask state; only `denied` is the dead end. `granted:
+  false` alone cannot tell those apart, which is exactly the distinction the plan's three
+  states need. The `{ granted }` shape is unchanged — `state` is additive.
+- **NEW plugin method `openAppSettings`** (`Settings.ACTION_APPLICATION_DETAILS_SETTINGS` +
+  `FLAG_ACTIVITY_NEW_TASK`, started from the application context). This is a 15th method on a
+  Must Have 6 list of 14, and it is load-bearing: once Android has recorded "don't ask again"
+  the dialog never returns, so a denied state with no route to Settings would be a dead end.
+  The alternative was a third-party settings plugin, which Must NOT Have's "no new
+  dependencies for two screens" spirit argues against harder than 8 lines of Kotlin do.
+- `src/plugins/player.web.js` gained `listTracks`, `getArtwork`, both permission methods and
+  `openAppSettings`, so `npm run dev` in a desktop browser now renders the real library UI
+  against three mock tracks (mixed Greek/Latin, so collation and search are exercisable there
+  too) instead of dying on the first `listTracks` call.
+- **`App.vue` now REPORTS the T11 skip** (Must Have 13's other half): `lastError` raises a
+  self-dismissing (6s) notice row in the shell grid, not a floating toast — the skip can happen
+  while any screen is open, or none, and a grid row cannot overlap the mini-player.
+- QA (device, every step a real tap): `pm revoke` + relaunch → ask state, `rows: 0`, no search
+  box ✓; tapping `Allow access` raised the real dialog and granting it populated the list to 3
+  rows **in the same WebView process** (devtools socket pid unchanged — no restart) ✓; denying
+  once left the ask state (Android still reports `prompt-with-rationale`), and the second
+  dialog's `Don't allow and don't ask again` flipped the UI to `Access to music is turned off`
+  with `Open app settings`, which opened `com.android.settings/.spa.SpaActivity` ✓; with
+  permission granted and the fixtures deleted + `scan_volume`, relaunch rendered `No music
+  found` ✓; after `npm run fixtures`, the state's own `Refresh` button repopulated all 3 rows
+  with no restart ✓ (`/tmp/kefi-permission.png`, `/tmp/kefi-permission-denied.png`,
+  `/tmp/kefi-empty.png`).
+- QA tooling: NEW `tapsys.sh` in the scratchpad taps system-UI elements (permission dialog,
+  Settings) by resource-id substring out of `uiautomator dump`. Note the dialog's button ids
+  CHANGE with the attempt: `permission_deny_button` first time,
+  `permission_deny_and_dont_ask_again_button` on the repeat — a script that hardcodes the first
+  id silently fails on the second dialog. Also: while a system dialog is up, `tapsel.sh`
+  correctly reports the WebView tap as a miss instead of pretending it landed.

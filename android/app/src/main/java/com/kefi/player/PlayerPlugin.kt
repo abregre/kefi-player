@@ -1,7 +1,10 @@
 package com.kefi.player
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -280,13 +283,13 @@ class PlayerPlugin : Plugin() {
 
     @PluginMethod
     fun checkAudioPermission(call: PluginCall) {
-        call.resolve(JSObject().put("granted", hasAudioPermission()))
+        call.resolve(audioPermissionResult())
     }
 
     @PluginMethod
     fun requestAudioPermission(call: PluginCall) {
         if (hasAudioPermission()) {
-            call.resolve(JSObject().put("granted", true))
+            call.resolve(audioPermissionResult())
             return
         }
         requestPermissionForAlias(audioPermissionAlias(), call, "audioPermissionCallback")
@@ -294,8 +297,38 @@ class PlayerPlugin : Plugin() {
 
     @PermissionCallback
     private fun audioPermissionCallback(call: PluginCall) {
-        call.resolve(JSObject().put("granted", hasAudioPermission()))
+        call.resolve(audioPermissionResult())
     }
+
+    /**
+     * Opens this app's own page in system Settings. Needed by T19's denied state: once the
+     * user has picked "Don't allow" twice, Android refuses to show the dialog again, so the
+     * only honest thing the UI can offer is a way to the toggle that is actually blocking it.
+     * `FLAG_ACTIVITY_NEW_TASK` because the Settings activity is started from an application
+     * context, not from an Activity task.
+     */
+    @PluginMethod
+    fun openAppSettings(call: PluginCall) {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        call.resolve()
+    }
+
+    /**
+     * `granted` is the answer the UI acts on; `state` is the extra detail T19's three states
+     * need. Capacitor already tracks the distinction Android itself exposes — `prompt`
+     * (never asked) and `prompt-with-rationale` (declined once, asking is still allowed) both
+     * mean "the button should ask", while `denied` means the dialog will not appear again and
+     * only system Settings can undo it. Guessing that from `granted: false` alone is
+     * impossible, which is why the field is here rather than a locally-remembered "have we
+     * asked yet" flag.
+     */
+    private fun audioPermissionResult(): JSObject = JSObject()
+        .put("granted", hasAudioPermission())
+        .put("state", getPermissionState(audioPermissionAlias()).toString())
 
     /**
      * `READ_MEDIA_AUDIO` (API 33+) replaced `READ_EXTERNAL_STORAGE` for reading audio;

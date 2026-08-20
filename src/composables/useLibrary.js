@@ -13,8 +13,15 @@ import { Player } from '../plugins/player'
  * @type {import('vue').Ref<PlayerTrack[]>}
  */
 const tracks = ref([])
-/** `'idle' | 'loading' | 'ready' | 'denied' | 'error'` — drives T19's three states. */
+/** `'idle' | 'loading' | 'ready' | 'denied' | 'error'`. */
 const status = ref('idle')
+/**
+ * The audio permission as Android sees it: `'unknown'` before the first check, then
+ * Capacitor's own `granted | denied | prompt | prompt-with-rationale`. The two `prompt`
+ * values mean the system dialog can still be shown, so the UI offers a button that asks;
+ * `denied` means it never will again, so the only honest offer is system settings (T19).
+ */
+const permission = ref('unknown')
 const errorMessage = ref('')
 /** Free-text search, applied in memory over `tracks`. */
 const query = ref('')
@@ -78,6 +85,23 @@ function messageOf(err) {
   if (err instanceof Error) return err.message
   if (typeof err === 'string') return err
   return 'Something went wrong'
+}
+
+/**
+ * Reads the permission state WITHOUT prompting. Called before every load so the UI can
+ * tell "never asked" from "shut out", which `granted: false` alone cannot express.
+ * @returns {Promise<boolean>} whether audio may be read right now.
+ */
+async function checkPermission() {
+  try {
+    const result = await Player.checkAudioPermission()
+    permission.value = result.state ?? (result.granted ? 'granted' : 'denied')
+    return result.granted
+  } catch (err) {
+    permission.value = 'denied'
+    errorMessage.value = messageOf(err)
+    return false
+  }
 }
 
 /**
@@ -191,8 +215,40 @@ async function loadArtwork(trackId) {
   }
 }
 
+/**
+ * Shows the system dialog, then loads immediately on success — the plan's requirement is
+ * that granting populates the list with no app restart. A refusal leaves `permission` at
+ * whatever Android now reports, which is how the UI decides between "ask again" and
+ * "open settings".
+ */
+async function requestPermission() {
+  try {
+    const result = await Player.requestAudioPermission()
+    permission.value = result.state ?? (result.granted ? 'granted' : 'denied')
+    if (result.granted) await load({ force: true })
+    return result.granted
+  } catch (err) {
+    errorMessage.value = messageOf(err)
+    return false
+  }
+}
+
+/**
+ * The one call a view needs on mount: resolve the permission, then load only if it is
+ * actually granted. Asking `listTracks` first and reading the rejection would work too,
+ * but it cannot distinguish "never asked" from "denied for good".
+ */
+async function initialize() {
+  if (await checkPermission()) await load()
+}
+
 export function useLibrary() {
   return {
+    permission: readonly(permission),
+    checkPermission,
+    requestPermission,
+    initialize,
+    openAppSettings: () => Player.openAppSettings(),
     albums,
     artists,
     trackByUri,

@@ -110,6 +110,74 @@ export class PlayerWeb extends WebPlugin {
   }
 
   /**
+   * Three mock tracks shaped exactly like the native `listTracks` payload, so the library
+   * UI can be built and styled with `npm run dev`. Mixed Greek/Latin on purpose — the
+   * collation and search behaviour is the part a browser CAN exercise faithfully.
+   */
+  async listTracks() {
+    return {
+      tracks: [
+        {
+          id: 1,
+          uri: 'mock://1',
+          title: 'Άσπρη Μέρα',
+          artist: 'Δήμητρα Παπαδοπούλου',
+          album: 'Κέφι Vol 1',
+          albumArtist: null,
+          trackNumber: null,
+          year: null,
+          durationMs: 180000,
+          size: 2_880_000,
+        },
+        {
+          id: 2,
+          uri: 'mock://2',
+          title: 'Zeibekiko',
+          artist: 'Nikos Alexiou',
+          album: 'Kefi Vol 1',
+          albumArtist: null,
+          trackNumber: null,
+          year: null,
+          durationMs: 210000,
+          size: 3_360_000,
+        },
+        {
+          id: 3,
+          uri: 'mock://3',
+          title: 'Ωδή',
+          artist: 'Δήμητρα Παπαδοπούλου',
+          album: 'Κέφι Vol 2',
+          albumArtist: null,
+          trackNumber: null,
+          year: null,
+          durationMs: 240000,
+          size: 3_840_000,
+        },
+      ],
+    }
+  }
+
+  async getArtwork() {
+    // No embedded art in a browser: null exercises the placeholder path, which is the
+    // branch worth looking at while styling.
+    return { dataUrl: null }
+  }
+
+  async checkAudioPermission() {
+    // A browser has no MediaStore permission to ask about; granted keeps `npm run dev`
+    // on the happy path instead of parking it in T19's permission state.
+    return { granted: true, state: 'granted' }
+  }
+
+  async requestAudioPermission() {
+    return { granted: true, state: 'granted' }
+  }
+
+  async openAppSettings() {
+    console.info('[PlayerWeb] openAppSettings is a no-op in the browser')
+  }
+
+  /**
    * Dev-only helper, not part of the native `PlayerPlugin` contract: lets `npm run dev`
    * (no real Media3/file-system errors available in a browser) exercise the `trackUnavailable`
    * path the same way a real deleted/permission-revoked file does on device (T11).

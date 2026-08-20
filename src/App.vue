@@ -3,12 +3,24 @@
 // Both of the latter live OUTSIDE <RouterView> so navigating never remounts them —
 // that is what keeps playback controls (and their local position interpolation)
 // alive across a tab change.
-import { onMounted, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useI18n } from './i18n'
 import MiniPlayer from './components/MiniPlayer.vue'
 import TabBar from './components/TabBar.vue'
 import { usePlayer } from './composables/usePlayer'
 
 const player = usePlayer()
+const { t } = useI18n()
+
+/*
+ * T11 skips an unplayable file and moves on; Must Have 13 wants that REPORTED rather
+ * than silent. It lives in the shell, not in a view, because the skip can happen while
+ * any screen is open (or none of them — the queue advances in the background too), and
+ * it self-dismisses because there is nothing for the user to do about it.
+ */
+const skipNotice = ref(false)
+/** @type {ReturnType<typeof setTimeout> | null} */
+let skipTimer = null
 
 onMounted(() => {
   // Idempotent: wires the playerState push listener, the pull-on-resume handler,
@@ -55,7 +67,13 @@ watch(
 )
 
 watch(player.lastError, (value) => {
-  if (value) console.log('[QA] trackUnavailable', JSON.stringify(value))
+  if (!value) return
+  console.log('[QA] trackUnavailable', JSON.stringify(value))
+  skipNotice.value = true
+  if (skipTimer != null) clearTimeout(skipTimer)
+  skipTimer = setTimeout(() => {
+    skipNotice.value = false
+  }, 6000)
 })
 </script>
 
@@ -64,6 +82,7 @@ watch(player.lastError, (value) => {
     <main class="content">
       <RouterView />
     </main>
+    <p v-if="skipNotice" class="skip-notice" role="status">{{ t('error.trackUnavailable') }}</p>
     <MiniPlayer />
     <TabBar />
   </div>
@@ -74,7 +93,7 @@ watch(player.lastError, (value) => {
   /* Route area scrolls; mini-player and tab bar are pinned by the grid, so no
      fixed positioning and no scroll-jump when the keyboard opens. */
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: 1fr auto auto auto;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -83,5 +102,17 @@ watch(player.lastError, (value) => {
 .content {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* A row in the grid rather than a floating toast: it pushes the mini-player down for
+   the few seconds it is up, which is impossible to miss and impossible to overlap. */
+.skip-notice {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border-top: 1px solid var(--border);
 }
 </style>
