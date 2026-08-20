@@ -104,3 +104,38 @@ Verified: task swiped away while paused → 0 service records, 0 notifications, 
 `task removed while not playing, stopping`; task swiped away while PLAYING → service alive,
 `state=PLAYING(3)`, position still advancing; back-out while paused → service and notification
 both gone, and the next launch still restored track/index/position paused (T12 intact).
+
+## Device feedback round 2 (2026-08-20) — horizontal overflow from long track names
+Reported: long song names in Songs/Albums, and any long name loaded in the player, made the
+app "overflow x and break the UI". Round 1's inset fix was confirmed working; this is separate.
+
+**Cause: `.shell` in `src/App.vue` is a grid whose single column was the implicit `auto`.**
+A grid item's *automatic minimum size* is its MIN-CONTENT size, so one long unbroken run of
+text (a 70-character title in a row, or in the mini-player) sized that column to its own
+min-content and the entire app was laid out wider than the screen. `overflow: hidden` on the
+same element then hid the evidence: no scrollbar, but the right-hand side of every row and
+every control there was clipped off screen and untappable — which is also why a scripted tap
+on the mini-player's play button reported a miss during the repro.
+
+Measured on a 360px-wide viewport (density 480, font_scale 1.3) with a 74-character Greek
+title: `.content` was **835px** wide. Fix: `grid-template-columns: minmax(0, 1fr)` — `minmax`
+is what allows a track to go below min-content. Plus `overflow-x: hidden` on `.content` as a
+structural backstop, `overflow-wrap: anywhere` on the Now Playing metadata and the no-results
+line (a MediaStore title falls back to the FILE NAME, often one unbroken string with no break
+opportunity at all).
+
+**Second-order problem the fix exposed**: with wrapping enabled, an unbroken title took three
+lines on Now Playing and pushed the transport row below the fold. Title is now clamped to 2
+lines (`-webkit-line-clamp`), artist and album to one line with ellipsis. Verified: transport
+bottom 663px inside a 731px viewport.
+
+**Regression guard, committed** (`scripts/qa-playback.sh`, last step): injects a 140-character
+title straight into every visible row and the mini-player over the DevTools bridge and asserts
+the route area still equals the viewport width and no element extends past it. No fixture
+needed. Negative-tested — with `grid-template-columns: auto` restored, the same check measures
+1417px against a 412px viewport, i.e. it fails as it should.
+
+Note for future UI work: 412dp/font_scale 1.0 (this emulator's default) does NOT reproduce
+this class of bug. Reproduce with `wm density 480` + `settings put system font_scale 1.3`, and
+add a temporary long-title fixture (`ffmpeg -metadata title=…`, push, `scan_file`, delete and
+`scan_volume` afterwards) — the committed fixtures stay at 3 on purpose.

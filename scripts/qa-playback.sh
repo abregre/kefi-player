@@ -443,6 +443,55 @@ NOTIFICATIONS=$("${EMU[@]}" shell dumpsys notification --noredact | grep -c "pkg
 
 # Everything above depends on the app being up; put it back so a re-run starts clean.
 launch_app >/dev/null 2>&1
+sleep 2
+
+# --- layout: long names must not widen the app ----------------------------------
+
+step "Layout — a long track name cannot widen the app"
+
+# A grid item's automatic minimum size is its MIN-CONTENT size, so one long unbroken title
+# used to size the shell's single column past the viewport: the app was laid out ~2.3x too
+# wide and clipped, leaving the right-hand side of every row — and every control there —
+# off screen and untappable. This injects a worse title than any real file has, straight into
+# the DOM, and asserts the layout does not budge. No fixture needed, and it is the last thing
+# the suite does, so the mutated DOM matters to nobody.
+LAYOUT=$(js "(() => {
+  const long = 'Χ'.repeat(140);
+  for (const el of document.querySelectorAll('.track-row .title, .track-row .sub, .mini .title, .mini .artist')) {
+    el.textContent = long;
+  }
+  const content = document.querySelector('.content');
+  const overflowing = [...document.querySelectorAll('*')].filter(
+    (el) => el.getBoundingClientRect().right > window.innerWidth + 1,
+  ).length;
+  return JSON.stringify({
+    contentWidth: Math.round(content ? content.getBoundingClientRect().width : -1),
+    innerWidth: window.innerWidth,
+    overflowing,
+    injectedInto: document.querySelectorAll('.track-row .title').length,
+  });
+})()")
+
+if [[ "$LAYOUT" == __CDP_ERROR__* ]]; then
+  fail "layout check could not run: ${LAYOUT#__CDP_ERROR__}"
+else
+  LAYOUT=$(node -e 'console.log(JSON.parse(process.argv[1]))' "$LAYOUT")
+  INJECTED=$(jsonval "$LAYOUT" injectedInto)
+  CONTENT_W=$(jsonval "$LAYOUT" contentWidth)
+  INNER_W=$(jsonval "$LAYOUT" innerWidth)
+  OVERFLOWING=$(jsonval "$LAYOUT" overflowing)
+  if [[ "$INJECTED" == 0 ]]; then
+    fail "layout check found no track rows to lengthen (library empty?)"
+  else
+    [[ "$CONTENT_W" == "$INNER_W" ]] &&
+      pass "a 140-character title leaves the route area at the viewport width (${CONTENT_W}px)" ||
+      fail "a 140-character title widened the route area to ${CONTENT_W}px on a ${INNER_W}px viewport"
+
+    [[ "$OVERFLOWING" == 0 ]] &&
+      pass "no element extends past the viewport with a 140-character title" ||
+      fail "$OVERFLOWING element(s) extend past the viewport with a 140-character title"
+  fi
+fi
 
 step "Summary"
 echo "$((CHECKS - FAILURES))/$CHECKS checks passed"

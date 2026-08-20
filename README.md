@@ -80,7 +80,7 @@ The Library screen renders three distinct states rather than a blank list:
 
 ```bash
 npm run fixtures          # push + index 3 deterministic audio fixtures (needs ffmpeg)
-npm run qa                # 33 scripted checks; exits non-zero on any FAIL
+npm run qa                # 35 scripted checks; exits non-zero on any FAIL
 bash scripts/qa-playback.sh 1a2b3c4d   # ...against a specific adb serial
 ```
 
@@ -88,7 +88,8 @@ bash scripts/qa-playback.sh 1a2b3c4d   # ...against a specific adb serial
 device: foreground-service type, media-session state, notification channel and style,
 queue and transport, metadata completeness, WebView renderer death, screen-off playback,
 persistence across `am force-stop`, and that closing the app while paused leaves neither a
-service nor a notification behind. It drives the app through its own JS bridge (evaluated inside
+service nor a notification behind, and that a 140-character track name cannot widen the
+layout. It drives the app through its own JS bridge (evaluated inside
 the running WebView over the DevTools protocol) rather than through pixel coordinates,
 because a tap that misses reads exactly like a passing test.
 

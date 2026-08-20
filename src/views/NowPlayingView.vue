@@ -291,11 +291,33 @@ function cycleRepeat() {
   text-align: center;
 }
 
+/*
+ * Long names are the norm in a local library — MediaStore falls back to the file name, which
+ * is often one unbroken string with no spaces to break at. Two things follow, and both are
+ * needed: `overflow-wrap: anywhere` so such a string cannot push the layout sideways, and a
+ * hard line budget so it cannot push the transport controls off the bottom of the screen
+ * either (an unclamped title took three lines on a 360px viewport and the play button went
+ * below the fold).
+ */
 .title {
   font-family: var(--font-display);
   font-size: 1.3rem;
   margin: 0;
   line-height: 1.25;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.artist,
+.album {
+  /* One line each: on this screen they are context for the title, not the subject. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .artist {

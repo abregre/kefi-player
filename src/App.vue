@@ -94,6 +94,18 @@ watch(player.lastError, (value) => {
      fixed positioning and no scroll-jump when the keyboard opens. */
   display: grid;
   grid-template-rows: 1fr auto auto auto;
+  /*
+   * `minmax(0, 1fr)`, never the implicit `auto` column. A grid item's automatic minimum
+   * size is its MIN-CONTENT size, so one long unbroken run of text — a 70-character song
+   * title in the list or in the mini-player — sizes the single column to its own
+   * min-content and the whole app is laid out wider than the screen. With `overflow:
+   * hidden` below there is no scrollbar to reveal it either: the right-hand side of every
+   * row, and every control living there, is simply clipped away and untappable. Measured on
+   * a 360px-wide viewport: the route area came out 835px wide. Reported from a real device
+   * on 2026-08-20 ("κάνει overflow x και σπάει το UI"); `minmax(0, …)` is what lets the
+   * column go below min-content.
+   */
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -107,6 +119,9 @@ watch(player.lastError, (value) => {
 
 .content {
   overflow-y: auto;
+  /* Belt to the grid's braces: whatever a future screen does, it can never turn the app
+     into a horizontally scrolling surface. Vertical scrolling is unaffected. */
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
 

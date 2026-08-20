@@ -317,5 +317,7 @@ function playGroup(group) {
   margin: 0 0 0.3rem;
   font-family: var(--font-display);
   font-size: 1rem;
+  /* Echoes the user's own query back, which can be anything at all. */
+  overflow-wrap: anywhere;
 }
 </style>
