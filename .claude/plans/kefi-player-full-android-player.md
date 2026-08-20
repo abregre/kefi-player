@@ -476,7 +476,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     label between `Library` and `Βιβλιοθήκη` without reload; relaunching the app keeps the
     chosen language.
 
-- [ ] **T15: Songs list with search and Greek collation**
+- [x] **T15: Songs list with search and Greek collation**
   - Files: `src/views/LibraryView.vue`; NEW `src/components/TrackRow.vue`; NEW
     `src/utils/format.js` (port `formatDuration` from
     `/mnt/X/myProjects/ytmp3/src/utils/format.ts:1-8` to plain JS); NEW

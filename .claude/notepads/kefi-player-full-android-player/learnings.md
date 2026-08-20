@@ -1138,3 +1138,42 @@ smooth bar with zero extra IPC.
   `["Βιβλιοθήκη","Ρυθμίσεις"]` with `performance.getEntriesByType('navigation').length` still `1`
   and the live CDP session unbroken — proof it re-rendered rather than reloaded ✓.
   `am force-stop` + relaunch came back up with the Greek labels ✓ (`/tmp/kefi-settings-el.png`).
+
+## T15 — Songs list, search, Greek collation (2026-08-20)
+- NEW `src/composables/useLibrary.js`, `src/components/TrackRow.vue`, `src/utils/format.js`
+  (`formatDuration` ported from ytmp3 `format.ts:1-8` + a `formatMs` wrapper, since the whole
+  native contract speaks milliseconds); rewritten `src/views/LibraryView.vue`;
+  `usePlayer.js` gained `setQueue/next/previous/setShuffle/setRepeatMode` wrappers (T17/T18 need
+  the same ones, and going through the composable keeps the shared refs from going stale).
+- `usePlayer.js`: `repeatMode` ref default corrected `0` → `'off'`. The wire contract has been a
+  STRING since T10; the numeric default was only ever visible in the first render before the
+  first snapshot arrived.
+- **One collator, used for both sort and search** — `Intl.Collator('el', { sensitivity: 'base',
+  numeric: true })`. `numeric: true` additionally keeps `Track 2` before `Track 10`.
+- **There is no `Intl` "contains" primitive**, so `collatorIncludes()` slides a window of the
+  needle's length across the haystack and asks the collator whether the window collates equal.
+  Both sides are `normalize('NFC')`-ed first: a decomposed title (NFD, as some tag editors write)
+  would otherwise have its combining marks sliced apart mid-window and never match. Cost is
+  O(len) compares per field, run only over the already-in-memory list.
+- **Script order verified on device, not assumed.** `Intl.Collator('el')` puts Greek BEFORE Latin
+  in both Node 22 and the API 36 WebView, so the plan's expected `Άσπρη Μέρα < Ωδή < Zeibekiko`
+  holds. (`el-u-kr-grek-latn` gives the same order and was not needed.)
+- Tapping a row queues **the visible list**, not the whole library: playing the 3rd search hit
+  then continues with the 4th hit.
+- **NATIVE FIX, outside T15's declared file list, required for T17/T18 to be possible at all.**
+  `PlayerController.toSnapshot()` read `currentMediaItem.mediaMetadata`, which is EMPTY for any
+  queue built from bare uris (`setQueue`) — every queue-driven track crossed the bridge as
+  `title: null, artist: null` while the notification showed them correctly. Two changes:
+  (a) the snapshot now prefers the player's COMBINED `mediaMetadata` (a superset: MediaItem
+  metadata merged with the extractor's tags), falling back to the item's own;
+  (b) NEW `Player.Listener.onMediaMetadataChanged` → `broadcastState()` (broadcast only, no
+  `persistState()`), because the extractor reads tags a beat after playback starts, so the
+  snapshot taken at start time would otherwise keep reporting the null until an unrelated event
+  fired. **Snapshot keys unchanged — the frozen 11-key contract is untouched**, only the source
+  of two values. Verified: `[QA] playerState … "title":"Zeibekiko","artist":"Nikos Alexiou"`.
+- QA (device): exactly 3 rows ✓; titles render `["Άσπρη Μέρα","Ωδή","Zeibekiko"]` ✓; typing
+  `ωδη` (no tonos, lower case) narrows to exactly 1 row `Ωδή` ✓; `ΠΑΠΑΔΟΠΟΥΛΟΥ` (upper, no
+  tonos) matches both of that artist's tracks ✓; clearing restores 3 ✓; a real tap on the
+  `Zeibekiko` row → `dumpsys media_session` `state=PLAYING(3)`, `description=Zeibekiko, Nikos
+  Alexiou, Kefi Vol 1`, snapshot `queueLength: 3, currentIndex: 2` ✓
+  (`/tmp/kefi-songs.png`, `/tmp/kefi-songs-playing.png`).

@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -164,6 +165,18 @@ object PlayerController {
             broadcastState()
         }
 
+        /**
+         * The extractor reads a file's tags a beat AFTER playback starts, so the snapshot
+         * taken at start time reports a null title for any queue built from bare uris
+         * (`setQueue`, T10 — a `MediaItem` from a uri carries no metadata of its own).
+         * Without this branch the UI would keep showing that null until some unrelated
+         * event happened to fire. Broadcast only: nothing here changes what
+         * `persistState()` writes.
+         */
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            broadcastState()
+        }
+
         override fun onPlaybackStateChanged(playbackState: Int) {
             persistState()
             broadcastState()
@@ -278,11 +291,18 @@ object PlayerController {
     private fun MediaController.toSnapshot(): Snapshot {
         val item = currentMediaItem
         val rawDuration = duration
+        // Prefer the player's COMBINED metadata over the MediaItem's own: a queue built
+        // from bare uris (setQueue, T10) carries no MediaItem metadata at all, so reading
+        // the item alone reported title/artist as null for every queue-driven track while
+        // the notification — which reads the combined metadata — showed them correctly.
+        // The combined value is a superset: it already includes whatever playTrack put on
+        // the MediaItem, merged with the tags the extractor read out of the file.
+        val combined = mediaMetadata
         return Snapshot(
             mediaId = item?.mediaId?.takeIf { it.isNotEmpty() },
             uri = item?.localConfiguration?.uri?.toString(),
-            title = item?.mediaMetadata?.title?.toString(),
-            artist = item?.mediaMetadata?.artist?.toString(),
+            title = (combined.title ?: item?.mediaMetadata?.title)?.toString(),
+            artist = (combined.artist ?: combined.albumArtist ?: item?.mediaMetadata?.artist)?.toString(),
             currentPosition = currentPosition,
             duration = if (rawDuration == C.TIME_UNSET) 0L else rawDuration,
             isPlaying = isPlaying,

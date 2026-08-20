@@ -17,7 +17,7 @@ const currentPosition = ref(0)
 const duration = ref(0)
 const isPlaying = ref(false)
 const shuffleModeEnabled = ref(false)
-const repeatMode = ref(0)
+const repeatMode = ref('off')
 const queueLength = ref(0)
 const currentIndex = ref(0)
 /** Message from the most recent failed getPlayerState/action call, if any. */
@@ -154,6 +154,54 @@ export function usePlayer() {
     }
   }
 
+  /**
+   * Replaces the whole queue and starts at `startIndex` (T15: the tapped row, with
+   * the full VISIBLE list behind it, so a search result plays in the order the user
+   * is looking at).
+   * @param {{ uris: string[], startIndex?: number }} options
+   */
+  async function setQueue(options) {
+    try {
+      applySnapshot(await Player.setQueue(options))
+    } catch (err) {
+      stateError.value = errorMessage(err)
+    }
+  }
+
+  async function next() {
+    try {
+      applySnapshot(await Player.next())
+    } catch (err) {
+      stateError.value = errorMessage(err)
+    }
+  }
+
+  async function previous() {
+    try {
+      applySnapshot(await Player.previous())
+    } catch (err) {
+      stateError.value = errorMessage(err)
+    }
+  }
+
+  /** @param {boolean} enabled */
+  async function setShuffle(enabled) {
+    try {
+      applySnapshot(await Player.setShuffle({ enabled }))
+    } catch (err) {
+      stateError.value = errorMessage(err)
+    }
+  }
+
+  /** @param {'off' | 'one' | 'all'} mode */
+  async function setRepeatMode(mode) {
+    try {
+      applySnapshot(await Player.setRepeatMode({ mode }))
+    } catch (err) {
+      stateError.value = errorMessage(err)
+    }
+  }
+
   /** @param {number} positionMs */
   async function seek(positionMs) {
     try {
@@ -183,5 +231,10 @@ export function usePlayer() {
     pause,
     resume,
     seek,
+    setQueue,
+    next,
+    previous,
+    setShuffle,
+    setRepeatMode,
   }
 }
