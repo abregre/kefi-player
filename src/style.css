@@ -5,35 +5,49 @@
  * Design tokens for the whole app. Every component reads these; no component
  * hardcodes a colour, so retheming is a single-file change.
  *
- * The palette is warm on purpose — "kefi" is high spirits, and a music player
- * spends most of its life on the Now Playing screen, where a warm dark ground
- * makes album artwork the brightest thing on screen.
+ * THE PALETTE (six fixed values, matching the app icon):
+ *   #00C853 green      #006B3C deep green
+ *   #FFEA00 yellow     #FFD600 deep yellow
+ *   #F5222D red        #080A0A near-black
  *
- * Two contrast decisions worth keeping:
- *  - Amber #ffb020 is a signal colour, not a text colour: it clears 4.5:1 on the
- *    dark ground but not on light surfaces. It drives progress fills, the play
- *    button and focus rings.
- *  - Text on top of an accent fill uses --on-accent (near-black), which clears
- *    4.5:1 against both amber and coral. Never put --text on an accent fill.
+ * The pairs are the point: the palette ships a bright and a deep version of both
+ * green and yellow, so each theme can take the one that actually reads on its own
+ * ground. Dark takes #00C853 / #FFEA00, light takes #006B3C / #FFD600 — the bright
+ * green is only 2.2:1 on white, and the bright yellow is 1.2:1, so using them there
+ * would be decoration pretending to be an interface.
+ *
+ * Surfaces, borders and muted text are neutrals derived from #080A0A (dark) or its
+ * inverse (light), tinted a few degrees green so they sit under the accents instead
+ * of fighting them. Every pairing below clears 4.5:1; the numbers are in the
+ * comments so a future edit can be checked rather than guessed.
+ *
+ * Two rules worth keeping:
+ *  - Text on an accent fill always uses --on-accent, never --text.
+ *  - --accent-strong and --accent-deep are FILL colours (gradients), not text.
+ *    Only --accent, --danger and --success are safe as coloured text.
  */
 :root {
-  --bg: #14100f;
-  --surface-1: #1e1917;
-  --surface-2: #2b2320;
-  --border: #453833;
-  --text: #f7f1ea;
-  --text-muted: #b3a49a;
+  --bg: #080a0a;
+  --surface-1: #101413;
+  --surface-2: #182220;
+  --border: #26332e;
+  --text: #f2f5f3; /* 16.9:1 on --surface-1 */
+  --text-muted: #9baaa2; /* 7.7:1 on --surface-1 */
 
-  /* Signal amber: fills, progress, focus. Not for text on light surfaces. */
-  --accent: #ffb020;
-  --accent-strong: #f2820c;
-  --accent-deep: #e0453f;
-  --accent-soft: #2f231a;
-  --on-accent: #14100f;
+  /* Signal green: fills, progress, focus, the active tab. 8.9:1 on --bg, so it is
+     also safe as text — which the current-track row relies on. */
+  --accent: #00c853;
+  /* Gradient middle and end. Together with --accent they run green -> yellow -> red,
+     which is the icon's own sweep. */
+  --accent-strong: #ffea00;
+  --accent-deep: #f5222d;
+  /* Tinted ground for selected rows: --accent on it is 7.4:1. */
+  --accent-soft: #06231a;
+  --on-accent: #080a0a; /* 8.9:1 on green, 16.1:1 on yellow */
 
-  --success: #58c98b;
-  --danger: #ff6b6b;
-  --danger-soft: #3a1a1a;
+  --success: #00c853;
+  --danger: #f5222d;
+  --danger-soft: #1e080a; /* --danger on it is 4.7:1 */
 
   /*
    * Safe-area insets, so screens can pad without repeating env() everywhere.
@@ -74,22 +88,27 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #faf5ef;
+    --bg: #f7faf8;
     --surface-1: #ffffff;
-    --surface-2: #f0e7dc;
-    --border: #ddcdbd;
-    --text: #14100f;
-    --text-muted: #6d5f56;
+    --surface-2: #e8f1eb;
+    --border: #cbdcd1;
+    --text: #080a0a; /* the palette's near-black, 19.9:1 on white */
+    --text-muted: #55635c; /* 6.3:1 on white */
 
-    /* Darkened so accent-coloured text still clears 4.5:1 on a white card. */
-    --accent: #b3660a;
-    --accent-strong: #c25a08;
-    --accent-deep: #b8302b;
-    --accent-soft: #fdeecf;
-    --on-accent: #fffaf3;
+    /* The palette's deep green. 6.6:1 on white, so it stays legible as text; the
+       bright green would be 2.2:1 and is not an option here. */
+    --accent: #006b3c;
+    /* Deep yellow rather than the bright one: still a fill-only colour, but the
+       bright one disappears into a white card. */
+    --accent-strong: #ffd600;
+    --accent-deep: #f5222d;
+    --accent-soft: #e3f7ea; /* --accent on it is 5.9:1 */
+    --on-accent: #ffffff; /* 6.6:1 on the deep green */
 
-    --success: #1c7a4a;
-    --danger: #c62828;
+    --success: #006b3c;
+    /* A shade of the palette red: #F5222D is only 3.6:1 on --danger-soft, this is
+       5.5:1. The red keeps its identity, the message stays readable. */
+    --danger: #c1121f;
     --danger-soft: #fdecec;
 
     color-scheme: light;

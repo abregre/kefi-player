@@ -166,6 +166,29 @@ Without a keystore, `npm run apk` (debug) still works; only release builds need 
   Keep `BRAND_BG` in `scripts/make-icons.py` equal to `--bg` in `src/style.css`, or the
   launch screen flashes a different colour before the WebView paints.
 
+## Colours
+
+The app runs on a six-value palette, matching the icon:
+
+| | | |
+| --- | --- | --- |
+| `#00C853` green | `#006B3C` deep green | `#FFEA00` yellow |
+| `#FFD600` deep yellow | `#F5222D` red | `#080A0A` near-black |
+
+They live in `src/style.css` as design tokens, and **no component hardcodes a colour** —
+retheming is that one file. The pairs exist so each theme can take the version that
+actually reads on its own ground: dark uses `#00C853`/`#FFEA00`, light uses
+`#006B3C`/`#FFD600` (the bright green is 2.2:1 on white, the bright yellow 1.2:1). Every
+foreground/background pairing in the file clears 4.5:1 and the ratio is written next to
+it. `--accent-strong` and `--accent-deep` are fill-only; only `--accent`, `--danger` and
+`--success` are safe as coloured text.
+
+The same palette is mirrored in three places that CSS cannot reach, and all three have to
+move together: `BRAND_BG` in `scripts/make-icons.py` (the splash and adaptive-icon
+background), `res/values/colors.xml` (the native chrome Capacitor still shows, e.g.
+text-selection handles in the WebView), and the generated
+`res/values/ic_launcher_background.xml`.
+
 ## Layout
 
 ```

@@ -40,7 +40,7 @@ ROUND_SCALE = 0.92
 
 # The launch screen paints this behind the logo. Keep it equal to --bg in
 # src/style.css, or the app flashes a different colour before the WebView paints.
-BRAND_BG = (0x14, 0x10, 0x0F)
+BRAND_BG = (0x08, 0x0A, 0x0A)
 
 # Fraction of the shorter splash edge taken up by the logo (legacy splash bitmaps).
 SPLASH_LOGO_SCALE = 0.28

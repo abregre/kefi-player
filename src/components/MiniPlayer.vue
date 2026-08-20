@@ -114,7 +114,9 @@ function toggle() {
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-deep));
+  /* Green -> yellow -> red, the icon's own sweep, so the strip reads as this app's
+     rather than as a generic progress bar. */
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong) 55%, var(--accent-deep));
 }
 
 .body {

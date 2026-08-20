@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Overrides Capacitor's own indigo defaults (its library defines colorPrimary
+    #3F51B5 and friends). These names are read by AppTheme in styles.xml and reach
+    the few pieces of native chrome a Capacitor app still shows — most visibly the
+    text-selection handles inside the WebView, which would otherwise be indigo in a
+    green app. Values are from the app palette; keep them in step with src/style.css.
+-->
+<resources>
+    <color name="colorPrimary">#006B3C</color>
+    <color name="colorPrimaryDark">#080A0A</color>
+    <color name="colorAccent">#00C853</color>
+</resources>

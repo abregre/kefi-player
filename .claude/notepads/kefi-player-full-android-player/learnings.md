@@ -1430,3 +1430,32 @@ fixed in `scripts/make-icons.py`:
   Result: `ic_launcher_background` and `splash_background` are now both `#14100F`.
 Verified on device: Android 12+ splash and launcher-drawer icon both correct; `npm run qa`
 35/35; debug APK 8.6MB.
+
+## Palette applied: #00C853 · #006B3C · #FFD600 · #FFEA00 · #F5222D · #080A0A (2026-08-20)
+Requested with "διατηρώντας το light/dark theme functionality", so the mapping is per-theme
+rather than one flat set of six colours.
+- **The pairs in the palette are what make two themes possible.** `#00C853` is 8.9:1 on
+  `#080A0A` but only **2.2:1 on white**, and `#FFEA00` is 1.2:1 on white — unusable as light
+  theme accents. So dark takes `#00C853`/`#FFEA00`, light takes `#006B3C` (6.6:1 on white) /
+  `#FFD600`. All four are palette values; nothing was invented.
+- Two derivations, both documented in `src/style.css` with their ratios: surfaces/borders/muted
+  text are neutrals off `#080A0A` (or its inverse) tinted a few degrees green, and light
+  `--danger` is `#C1121F` because the palette red is only 3.6:1 on `--danger-soft` (this is
+  5.5:1). The red keeps its identity where it is a fill (`--accent-deep` stays `#F5222D` in
+  both themes).
+- Every pairing was computed, not eyeballed: dark accent-on-surface 8.3:1, accent-on-accent-soft
+  7.4:1, danger-on-danger-soft 4.7:1 (which is why dark `--danger-soft` is `#1E080A`, not the
+  `#2A0C0E` that measured 4.45:1); light accent-on-white 6.6:1, accent-on-accent-soft 5.9:1,
+  text-muted 6.3:1.
+- `--accent-strong` had been defined but unused since T13. It is now the middle stop of the
+  mini-player's progress gradient — green → yellow → red, the icon's own sweep.
+- **Three non-CSS mirrors of the palette have to move with it**, and all three did:
+  `BRAND_BG` in `scripts/make-icons.py` (→ `#080A0A`, so the splash and adaptive-icon
+  background match `--bg`; icons regenerated), NEW `res/values/colors.xml` overriding
+  Capacitor's indigo `colorPrimary/colorPrimaryDark/colorAccent` (visible in the WebView's
+  text-selection handles), and the generated `ic_launcher_background.xml`.
+- Verified on device in BOTH themes, including a live `cmd uimode night yes|no` switch with the
+  app open: the WebView repaints from `prefers-color-scheme` and Capacitor's SystemBars flips
+  the status/navigation bar icon appearance on the configuration change (the manifest keeps
+  `uiMode` in `configChanges`, so the Activity is not recreated). Sampled pixels confirm dark
+  icons on the light strip and light icons on the dark one. `npm run qa` 35/35.

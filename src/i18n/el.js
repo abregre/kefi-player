@@ -52,11 +52,11 @@ export default {
   'player.openNowPlaying': 'Άνοιγμα αναπαραγωγής',
 
   'settings.title': 'Ρυθμίσεις',
-  'settings.language': 'Γλώσσα',
+  'settings.language': 'Γλωσσα',
   'settings.language.el': 'Ελληνικά',
   'settings.language.en': 'English',
-  'settings.about': 'Σχετικά',
-  'settings.about.body': 'Τοπικός music player. Χωρίς λογαριασμούς, χωρίς δίκτυο, χωρίς βάση.',
+  'settings.about': 'Σχετικα',
+  'settings.about.body': 'Χωρίς λογαριασμούς, χωρίς δίκτυο.',
 
   'error.trackUnavailable': 'Το αρχείο δεν μπόρεσε να παίξει, το προσπεράσαμε.',
   'error.generic': 'Κάτι πήγε λάθος.',
