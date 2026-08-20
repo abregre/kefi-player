@@ -168,3 +168,34 @@ ExoPlayer to play), plus a deny-list of playlist mime types that are nominally "
 they ARE in MediaStore rather than counting rows — filtering them is the app's job.
 `scripts/qa-playback.sh` gained the matching check: MediaStore holds ≥2 such rows and
 `listTracks` returns exactly 3 with none of them unplayable. Suite is now 36 checks.
+
+## Device feedback round 4 (2026-08-20) — wrong artwork in the media controls
+Reported: with the app in the background, some tracks showed the WRONG cover in the system
+media controls — two tracks by the same artist, each with its own embedded art, both wore a
+third track's.
+
+**Cause: the `artworkUri` added in round 2 is per ALBUM, not per track.**
+`TrackSource.mediaItemsFor` set `artworkUri =
+content://media/external/audio/albumart/<album_id>` so the controls would have a cover
+immediately. But MediaStore groups tracks into an album by their album TAG, and gives that
+album ONE piece of art — whichever the scanner extracted first. Any two tracks sharing an
+album tag (or both missing one, which is the common case for loose files) therefore point at
+the same image, and all but one of them wear a cover that is not theirs.
+
+Reproduced on the emulator in one shot: two files, same `artist`/`album` tags, one with a red
+embedded cover and one with blue. MediaStore gave both `album_id=5454779570008703957`, and
+`content read` on that albumart uri returned the RED image. Playing the BLUE track and
+opening the shade tinted the media card red (110,15,13) — the card takes its colour from the
+artwork, which makes this checkable from a screenshot without reading the bitmap.
+
+Fix: **do not set `artworkUri` at all.** ExoPlayer's extractor fills in per-track
+`artworkData` from the file itself, which is correct by construction, and Media3's
+`BitmapLoader` prefers it. A track with no embedded art now shows no art in the controls
+rather than a confidently wrong one. Verified after the fix: red track → card (113,15,13),
+blue track → (17,18,110), a track with no art → the neutral theme tint, and the QA fixture
+with embedded art still shows its orange cover.
+
+Note the in-app UI was never affected: it goes through `getArtwork` →
+`ContentResolver.loadThumbnail(trackUri)`, which is per track. That mismatch — right cover in
+the app, wrong one on the lock screen — is exactly the shape of this bug, and worth
+remembering as the tell.

@@ -54,10 +54,6 @@ object TrackSource {
             size > 64
     }
 
-    /** MediaStore's album-art provider. Undocumented but stable, and the cheap path to a
-     *  lock-screen cover: it is a uri, so no bitmap is decoded unless something asks for one. */
-    private val ALBUM_ART: Uri = Uri.parse("content://media/external/audio/albumart")
-
     /** MediaStore's placeholder for an untagged artist/album; showing it verbatim is worse
      *  than showing nothing, because the UI already has its own "unknown" strings. */
     private const val UNKNOWN = "<unknown>"
@@ -236,7 +232,6 @@ object TrackSource {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ARTIST,
-            MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.TRACK,
         )
         val selection = "${MediaStore.Audio.Media._ID} IN (${ids.joinToString(",") { "?" }})"
@@ -253,13 +248,11 @@ object TrackSource {
                 val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val albumArtistCol =
                     cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ARTIST)
-                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                 val trackCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
                     val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() }
                         ?: cursor.getString(displayNameCol)
-                    val albumId = if (cursor.isNull(albumIdCol)) null else cursor.getLong(albumIdCol)
                     // NO setDisplayTitle: the legacy MediaMetadataCompat bridge (Bluetooth
                     // AVRCP, older lock screens, Android Auto) renders the DISPLAY_* triplet
                     // when DISPLAY_TITLE is present and only falls back to title/artist/album
@@ -278,7 +271,13 @@ object TrackSource {
                         .setTrackNumber(
                             if (cursor.isNull(trackCol)) null else cursor.getInt(trackCol) % 1000,
                         )
-                        .setArtworkUri(albumId?.let { ContentUris.withAppendedId(ALBUM_ART, it) })
+                        // NO artworkUri. MediaStore's album art is per ALBUM, and it groups
+                        // by album tag: two tracks with the same (or empty) album tag share one
+                        // album_id, so pointing both at it shows whichever cover the scanner
+                        // happened to extract first — on a real device, two tracks that each
+                        // had their own art both wore a third track's (2026-08-20). The
+                        // extractor's per-track `artworkData` is the correct source and Media3
+                        // fills it in on its own; no art at all beats confidently wrong art.
                         .setIsBrowsable(false)
                         .setIsPlayable(true)
                         .build()
