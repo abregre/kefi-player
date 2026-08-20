@@ -30,12 +30,12 @@ const {
 
 const url = ref('')
 const info = ref(null)
-const bitrate = ref('256')
+const bitrate = ref('192')
 const isLookingUp = ref(false)
 const lookupError = ref('')
 const notice = ref('')
 
-const BITRATES = ['128', '256', '320']
+const BITRATES = ['128', '192', '256', '320']
 
 /*
  * Hidden only when the engine is provably current. If the check itself could not run

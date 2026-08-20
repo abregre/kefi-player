@@ -11,7 +11,7 @@ import { registerPlugin } from '@capacitor/core'
  */
 
 /**
- * @typedef {'128' | '256' | '320'} Bitrate
+ * @typedef {'128' | '192' | '256' | '320'} Bitrate
  */
 
 /**
