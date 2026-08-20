@@ -154,6 +154,14 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
    `setHandleAudioBecomingNoisy(true)`, `setWakeMode(C.WAKE_MODE_LOCAL)`, and a
    `DefaultMediaNotificationProvider` pinned to channel id `playback`.
    `onTaskRemoved()` is **not** overridden.
+   **AMENDED after device testing (2026-08-20):** `onTaskRemoved()` IS overridden now, and
+   has to be. Upstream's default calls `pauseAllPlayersAndStopSelf()`, but its own javadoc
+   notes the service cannot be stopped until every media controller has unbound — and this
+   app's `PlayerController` holds an application-scoped one for the whole process lifetime
+   (that is what makes Must Have 5 work). The result on a real phone was a foreground
+   notification that outlived the app and could not be swiped away, because Android does not
+   allow dismissing a media notification whose session is still active. The override releases
+   that binding first, and still keeps playing when something is playing.
 4. Manifest: the service with `android:foregroundServiceType="mediaPlayback"`,
    `android:exported="true"` and the `androidx.media3.session.MediaSessionService`
    intent-filter; `androidx.media3.session.MediaButtonReceiver`; and the permissions

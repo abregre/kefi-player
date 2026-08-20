@@ -21,15 +21,19 @@ import kotlinx.coroutines.withContext
  * routing; this class only builds the player/session and wires the notification
  * channel.
  *
- * Deliberately does NOT override [onTaskRemoved]: MediaSessionService's base
- * implementation already does
- * `if (!isPlaybackOngoing() || !isAnySessionPlaying()) pauseAllPlayersAndStopSelf();`,
- * which is the correct behaviour (stop when nothing is playing, keep running in the
- * background when something is). Re-implementing this would only reproduce upstream
- * logic, worse. Do not "fix" this by adding one back.
+ * [onTaskRemoved] IS overridden, contrary to the plan's original Must Have — see the
+ * method for the device-reported bug that forced it. The override keeps upstream's decision
+ * (keep running only while something is actually playing) and adds the one thing upstream
+ * cannot do for us: dropping our own application-scoped controller binding, without which
+ * `stopSelf()` can never take effect.
  */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
+
+    private companion object {
+        /** See the [setForegroundServiceTimeoutMs] call in [onCreate]. */
+        const val FOREGROUND_TIMEOUT_AFTER_PAUSE_MS = 30_000L
+    }
 
     private var player: ExoPlayer? = null
     private var session: MediaSession? = null
@@ -76,6 +80,15 @@ class PlaybackService : MediaSessionService() {
                 .build()
         )
 
+        // Media3 keeps the service in the FOREGROUND for this long after playback stops, and
+        // a foreground service's notification carries FLAG_NO_CLEAR — it cannot be swiped
+        // away. The default is 10 minutes (MediaSessionService.DEFAULT_FOREGROUND_SERVICE_-
+        // TIMEOUT_MS = 600_000), which on a real device reads as "a notification that never
+        // goes away and I can't dismiss by hand". 30s is long enough to cover pausing to take
+        // a call, or scrubbing between tracks, and short enough that a user who stops
+        // listening is not stuck with it.
+        setForegroundServiceTimeoutMs(FOREGROUND_TIMEOUT_AFTER_PAUSE_MS)
+
         restorePlaybackState(exoPlayer)
     }
 
@@ -118,6 +131,34 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+
+    /**
+     * The user swiped the app away. Upstream's default is
+     * `if (!isPlaybackOngoing() || !isAnySessionPlaying()) pauseAllPlayersAndStopSelf()`,
+     * whose intent is right — keep playing music the user chose to keep playing, otherwise
+     * shut down — but which cannot finish the job here, and upstream says so in its own
+     * javadoc: *"the service can't be stopped until all media controllers have been
+     * unbound"*.
+     *
+     * [PlayerController] holds exactly such a controller, application-scoped, for the whole
+     * process lifetime (that is what lets playback survive Activity/WebView recreation).
+     * So `stopSelf()` marked the service stoppable and nothing ever stopped it: the service,
+     * its foreground state and its undismissable notification outlived the app. Reported from
+     * a real device on 2026-08-20 as "I close the app and the thing never goes away, I can't
+     * even remove it by hand".
+     *
+     * Releasing our binding first is the missing half. When something IS playing this does
+     * nothing at all, which is the behaviour a music player must have.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (player?.isPlaying == true) {
+            Log.i("KefiApp", "PlaybackService task removed while playing, staying alive")
+            return
+        }
+        Log.i("KefiApp", "PlaybackService task removed while not playing, stopping")
+        PlayerController.release()
+        pauseAllPlayersAndStopSelf()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A null `intent` here is the documented signal that the OS is

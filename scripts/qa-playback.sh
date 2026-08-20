@@ -208,6 +208,22 @@ SHUFFLE=$(jsonval "$(player 'setShuffle({ enabled: true })')" shuffleModeEnabled
   fail "T10 setShuffle reported shuffleModeEnabled $SHUFFLE"
 player "setShuffle({ enabled: false })" >/dev/null
 
+# Regression guards for the metadata bugs a real device found on 2026-08-20.
+SNAP_TITLE=$(jsonval "$(player 'getPlayerState()')" title)
+[[ "$SNAP_TITLE" == "Άσπρη Μέρα" ]] &&
+  pass "T10 the snapshot's title matches the current item, not the previously played one" ||
+  fail "T10 snapshot title is '$SNAP_TITLE', expected Άσπρη Μέρα (stale metadata regression)"
+
+# `metadata:` is the session's own line. It must carry the full title/artist/album triplet:
+# setting a display title instead silently turns it into "<title>, null, null", which is what
+# Bluetooth head units and older lock screens render.
+SESSION_META=$(session_dump | grep -m1 "metadata: size")
+if [[ "$SESSION_META" == *"Άσπρη Μέρα, Δήμητρα Παπαδοπούλου, Κέφι Vol 1"* ]]; then
+  pass "T10 session metadata carries title, artist and album"
+else
+  fail "T10 session metadata is incomplete: ${SESSION_META:-none}"
+fi
+
 EXCEPTIONS=$("${EMU[@]}" logcat -d | grep -icE "AndroidRuntime|FATAL EXCEPTION")
 [[ "$EXCEPTIONS" == 0 ]] &&
   pass "T10 logcat has zero fatal exceptions" ||
@@ -402,9 +418,31 @@ else
     fail "T12 resumed from ${RESUMED_POS}ms, expected >= $((POS_AFTER - 2000))ms"
 fi
 
-# --- leave the device idle, not mid-playback ------------------------------------
+# --- service and notification lifetime -----------------------------------------
 
-player "pause()" >/dev/null 2>&1
+step "Service lifetime — closing the app while paused"
+
+# A media notification whose session is still active cannot be swiped away by hand, so a
+# service that outlives the UI leaves the user stuck with it (reported from a real device on
+# 2026-08-20). Paused + no UI means there is nothing for either to be for.
+player "pause()" >/dev/null
+sleep 2
+"${EMU[@]}" shell input keyevent KEYCODE_BACK   # at /library this calls App.exitApp()
+sleep 5
+
+SERVICE_RECORDS=$("${EMU[@]}" shell dumpsys activity services "$PKG" |
+  grep -c "ServiceRecord.*PlaybackService")
+[[ "$SERVICE_RECORDS" == 0 ]] &&
+  pass "PlaybackService stopped after the app closed while paused" ||
+  fail "PlaybackService is still running after the app closed while paused"
+
+NOTIFICATIONS=$("${EMU[@]}" shell dumpsys notification --noredact | grep -c "pkg=$PKG")
+[[ "$NOTIFICATIONS" == 0 ]] &&
+  pass "no leftover notification after the app closed while paused" ||
+  fail "$NOTIFICATIONS notification record(s) survived the app closing while paused"
+
+# Everything above depends on the app being up; put it back so a re-run starts clean.
+launch_app >/dev/null 2>&1
 
 step "Summary"
 echo "$((CHECKS - FAILURES))/$CHECKS checks passed"

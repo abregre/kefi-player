@@ -40,3 +40,67 @@
   intent (which in context, matching T8's notepad entry, is about bridge-crossing
   UI-observation polling, not an internal low-frequency disk-write scheduler). Full reasoning
   and live verification in `learnings.md` `## T12`.
+
+## Device feedback round 1 (2026-08-20) — three bugs from a real Android 15/16 phone
+The API 36 emulator could not show any of the three; all three needed either a different
+WebView version, a real track transition in the background, or a real "close the app" gesture.
+
+### 1. Layout broke on Settings/Library — Capacitor's insets strategy depends on the WebView version
+`src/style.css` defined `--safe-top`/`--safe-bottom` as `env(safe-area-inset-*)`. On Android
+that is only sometimes right, and which way it goes is decided by **Capacitor 8's own
+`SystemBars` plugin** (`node_modules/@capacitor/android/.../plugin/SystemBars.java`):
+- WebView **< 140**: it pads the WebView's PARENT by the system bars and zeroes the insets it
+  passes down. The page is not edge-to-edge, and `env()` = 0 is correct. This is the emulator
+  (WebView 133) — which is why everything looked perfect here.
+- WebView **140+ with `viewport-fit=cover`** (our `index.html` has it): it switches to
+  passthrough — no parent padding, the page IS edge-to-edge, and it injects the real insets as
+  **`--safe-area-inset-top/right/bottom/left`** CSS variables. A layout reading only `env()`
+  then paints its header under the clock and its tab bar under the gesture pill.
+Fix: `--safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px))` (and the other
+three). Capacitor's variable first — it is correct in BOTH modes — `env()` as the fallback for
+iOS/other WebViews, `0px` last. Verified by injecting 48px/24px into `--safe-area-inset-*` on
+the emulator: page padding-top went 17.6px → 65.6px, tab bar padding-bottom → 24px.
+**Do not "simplify" this back to env() alone.** Also note `insetsHandling: 'disable'` in
+`capacitor.config.json` would turn the injection off entirely.
+
+### 2. The media controls showed the PREVIOUS track after an automatic transition
+`setQueue` (and `PlaybackStateStore.restore`) built `MediaItem`s from bare uris, so they
+carried NO metadata. The notification, lock screen and Bluetooth head unit all render what the
+**session** reports, and with bare items that is empty until ExoPlayer's extractor has parsed
+the file — which happens after the item became current. Fix: NEW
+`TrackSource.mediaItemsFor(context, uris)` does ONE MediaStore query for the whole queue and
+attaches title/artist/album/albumArtist/trackNumber plus `artworkUri`
+(`content://media/external/audio/albumart/<albumId>` — verified to resolve to a real JPEG on
+API 36). Used by `setQueue`, `playTrack` (explicit title/artist still win) and `restore`.
+Two traps found while fixing it, both caught by reading `dumpsys media_session`:
+- **Do NOT `setDisplayTitle`.** The legacy `MediaMetadataCompat` bridge renders the DISPLAY_*
+  triplet when DISPLAY_TITLE exists and only falls back to title/artist/album otherwise, so
+  setting just the display title turned `description=Άσπρη Μέρα, Δήμητρα Παπαδοπούλου, Κέφι
+  Vol 1` into `description=Άσπρη Μέρα, null, null` — i.e. artist and album vanish on AVRCP.
+- **`PlayerController.toSnapshot()` precedence had to be INVERTED** from what T15 set up. T15
+  preferred the player's combined metadata because bare items had none; now that items carry
+  their own, the combined value is the stale one — it updates a beat after the current item
+  changes, so a snapshot taken right after `setQueue` reported the previously played title
+  next to the new `mediaId`. Item metadata leads, combined is the fallback for uris MediaStore
+  does not know.
+
+### 3. The notification outlived the app and could not be dismissed
+Three separate causes, all of which had to be fixed:
+- **A bound service cannot be destroyed.** `PlayerController`'s app-scoped `MediaController`
+  stayed bound for the process lifetime, so `stopSelf()` — including inside Media3's own
+  `pauseAllPlayersAndStopSelf()` — never took effect. Upstream documents this in
+  `MediaSessionService.onTaskRemoved`'s javadoc. Fix: `PlayerController.release()`, called from
+  `PlayerPlugin.handleOnDestroy()` and from the service's own `onTaskRemoved`.
+- **Media3 keeps the service in the foreground for 10 minutes after playback stops**
+  (`DEFAULT_FOREGROUND_SERVICE_TIMEOUT_MS = 600_000`), and a foreground notification carries
+  `FLAG_NO_CLEAR`. Fix: `setForegroundServiceTimeoutMs(30_000)`.
+- **`onTaskRemoved` had to be overridden** (against the plan's original Must Have — the plan is
+  amended): keep upstream's "only stay alive while actually playing" decision, but release our
+  own binding first so the stop can happen.
+- Plus: backing out at `/library` calls `App.exitApp()`, which destroys the Activity WITHOUT
+  removing the task, so `onTaskRemoved` never fires on that path. `handleOnDestroy` therefore
+  also `stopService`s when nothing is playing.
+Verified: task swiped away while paused → 0 service records, 0 notifications, log line
+`task removed while not playing, stopping`; task swiped away while PLAYING → service alive,
+`state=PLAYING(3)`, position still advancing; back-out while paused → service and notification
+both gone, and the next launch still restored track/index/position paused (T12 intact).

@@ -35,9 +35,26 @@
   --danger: #ff6b6b;
   --danger-soft: #3a1a1a;
 
-  /* Safe-area insets, so screens can pad without repeating env() everywhere. */
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /*
+   * Safe-area insets, so screens can pad without repeating env() everywhere.
+   *
+   * `--safe-area-inset-*` comes FIRST because it is the only source that is correct on
+   * every Android setup. Capacitor's built-in SystemBars plugin injects those four
+   * variables with the real window insets, and it changes strategy underneath us: with a
+   * WebView older than 140 it pads the WebView's parent (so the page is not edge-to-edge
+   * and the insets are legitimately 0), but with WebView 140+ and `viewport-fit=cover` it
+   * passes the insets straight through and the page IS edge-to-edge — at which point a
+   * layout that does not read them paints its header under the clock and its tab bar under
+   * the gesture pill. That is exactly what a real Android 15/16 phone showed on 2026-08-20
+   * while the API 36 emulator (WebView 133, padded mode) looked perfect.
+   *
+   * `env()` stays as the fallback: it is the correct source on iOS and on any WebView that
+   * reports it, and 0px is the last resort. Do not reduce this to env() alone.
+   */
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 
   /*
    * Two families: Inter for UI and body text (large x-height, built for

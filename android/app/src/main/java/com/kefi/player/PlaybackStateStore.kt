@@ -109,9 +109,10 @@ object PlaybackStateStore {
         }
 
         val storedIndex = p.getInt(KEY_INDEX, 0)
-        val items = survivingIndices.map { i ->
-            MediaItem.Builder().setUri(storedUris[i]).setMediaId(storedUris[i]).build()
-        }
+        // Through TrackSource so a restored queue carries the same metadata a freshly
+        // queued one does — otherwise the notification that comes back after process death
+        // would be a nameless "Now playing" until something else refreshed it.
+        val items = TrackSource.mediaItemsFor(context, survivingIndices.map { storedUris[it] })
         // Remap the saved current-item index onto the filtered list. If the item that was
         // actually current got dropped, fall back to the first surviving item at position 0
         // rather than guessing which neighbour the user meant.

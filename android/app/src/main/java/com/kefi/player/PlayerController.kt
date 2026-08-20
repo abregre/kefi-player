@@ -100,6 +100,16 @@ object PlayerController {
     private var consecutiveErrorCount = 0
 
     /**
+     * Last `isPlaying` value seen by [listener] (or by a snapshot). Readable without a
+     * controller and without touching the main thread, which is exactly what a teardown path
+     * needs: [PlayerPlugin.handleOnDestroy] has to decide whether the service may be stopped
+     * at a moment when it is also about to drop the controller.
+     */
+    @Volatile
+    var lastKnownIsPlaying: Boolean = false
+        private set
+
+    /**
      * T12: throttled position-persistence heartbeat. Media3's `Player.Listener` never fires
      * on a bare position tick (confirmed empirically in T8 — see the notepad's T8 entry, and
      * confirmed again by decompiling `MediaControllerImplBase` for T12: the periodic
@@ -154,6 +164,7 @@ object PlayerController {
 
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            lastKnownIsPlaying = isPlaying
             if (isPlaying) consecutiveErrorCount = 0
             if (isPlaying) startPositionHeartbeat() else stopPositionHeartbeat()
             persistState()
@@ -283,6 +294,32 @@ object PlayerController {
         }
     }
 
+    /**
+     * Unbinds from [PlaybackService] and drops the controller. The next call to any public
+     * method transparently reconnects, so this is safe to call whenever the UI goes away.
+     *
+     * Why this has to exist: a bound service cannot be destroyed. `stopSelf()` — including
+     * the one inside Media3's own `pauseAllPlayersAndStopSelf()` — only marks the service as
+     * stoppable; Android destroys it when the LAST client unbinds. This controller is
+     * application-scoped on purpose (it must outlive Activity/WebView recreation, T6/T8), so
+     * without an explicit release it stays bound for the whole process lifetime and the
+     * service, its foreground state and its notification survive the app being closed — the
+     * "notification I can't get rid of" reported from a real device on 2026-08-20.
+     *
+     * Posted to the main thread rather than run inline: [MediaController] throws if touched
+     * off its owning thread, and callers here are Activity/Service lifecycle callbacks.
+     */
+    fun release() {
+        mainHandler.post {
+            controller?.let { existing ->
+                existing.removeListener(listener)
+                existing.release()
+            }
+            controller = null
+            stopPositionHeartbeat()
+        }
+    }
+
     private suspend fun <T> withController(block: (MediaController) -> T): T {
         val ctrl = ensureController()
         return withContext(Dispatchers.Main) { block(ctrl) }
@@ -291,18 +328,29 @@ object PlayerController {
     private fun MediaController.toSnapshot(): Snapshot {
         val item = currentMediaItem
         val rawDuration = duration
-        // Prefer the player's COMBINED metadata over the MediaItem's own: a queue built
-        // from bare uris (setQueue, T10) carries no MediaItem metadata at all, so reading
-        // the item alone reported title/artist as null for every queue-driven track while
-        // the notification — which reads the combined metadata — showed them correctly.
-        // The combined value is a superset: it already includes whatever playTrack put on
-        // the MediaItem, merged with the tags the extractor read out of the file.
+        lastKnownIsPlaying = isPlaying
+        // The CURRENT ITEM's own metadata first, the player's combined metadata second.
+        //
+        // Order matters and has bitten in both directions. Items used to be built from bare
+        // uris and carried no metadata at all, so the item alone reported null for every
+        // queue-driven track — hence reading the combined value. But the combined value is
+        // updated ASYNCHRONOUSLY, one beat after the current item changes, so with items that
+        // DO carry metadata (TrackSource.mediaItemsFor) it briefly reports the PREVIOUS
+        // track: a snapshot taken right after setQueue returned the last-played title next to
+        // the new mediaId. The item is always in sync with mediaId, so it leads; combined
+        // stays as the fallback for anything MediaStore does not know (a file:// uri), where
+        // the extractor is the only source of a title.
         val combined = mediaMetadata
         return Snapshot(
             mediaId = item?.mediaId?.takeIf { it.isNotEmpty() },
             uri = item?.localConfiguration?.uri?.toString(),
-            title = (combined.title ?: item?.mediaMetadata?.title)?.toString(),
-            artist = (combined.artist ?: combined.albumArtist ?: item?.mediaMetadata?.artist)?.toString(),
+            title = (item?.mediaMetadata?.title ?: combined.title)?.toString(),
+            artist = (
+                item?.mediaMetadata?.artist
+                    ?: item?.mediaMetadata?.albumArtist
+                    ?: combined.artist
+                    ?: combined.albumArtist
+                )?.toString(),
             currentPosition = currentPosition,
             duration = if (rawDuration == C.TIME_UNSET) 0L else rawDuration,
             isPlaying = isPlaying,

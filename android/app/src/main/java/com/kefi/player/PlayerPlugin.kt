@@ -59,6 +59,27 @@ class PlayerPlugin : Plugin() {
     override fun handleOnDestroy() {
         PlayerController.onState = null
         PlayerController.onTrackUnavailable = null
+        // Unbind from PlaybackService. Without this the app-scoped MediaController keeps the
+        // service bound for the whole process lifetime, and a bound service cannot be
+        // destroyed — so closing the app left a foreground notification nobody could dismiss.
+        // Playback itself is unaffected: while something is playing the service is a started
+        // foreground service and survives the unbind; the controller reconnects lazily on the
+        // next plugin call (which is also what makes T8's Activity recreation work).
+        val wasPlaying = PlayerController.lastKnownIsPlaying
+        PlayerController.release()
+
+        // Nothing playing and no UI left: there is nothing for the service — or its media
+        // notification — to be for. Backing out of the app at /library destroys this Activity
+        // without removing the task, so `onTaskRemoved` never fires and the paused
+        // notification would otherwise sit in the shade indefinitely (Android will not let a
+        // media notification with an active session be swiped away).
+        //
+        // Safe against the Activity-recreation path this same callback serves (T8's renderer
+        // death): a stopped service is restarted by the next plugin call, and T12's persisted
+        // queue/index/position comes straight back — paused, which is what it already was.
+        if (!wasPlaying) {
+            context.stopService(Intent(context, PlaybackService::class.java))
+        }
     }
 
     @PluginMethod
@@ -85,17 +106,24 @@ class PlayerPlugin : Plugin() {
 
         App.scope.launch {
             try {
-                val metadata = MediaMetadata.Builder()
-                    .apply {
-                        if (!title.isNullOrEmpty()) setTitle(title)
-                        if (!artist.isNullOrEmpty()) setArtist(artist)
-                    }
-                    .build()
-                val item = MediaItem.Builder()
-                    .setUri(uri)
-                    .setMediaId(uri)
-                    .setMediaMetadata(metadata)
-                    .build()
+                // Start from what MediaStore knows (title/artist/album/artwork), so the
+                // notification and lock screen are right from the first frame, then let an
+                // explicitly passed title/artist win over it.
+                val base = TrackSource.mediaItemsFor(context, listOf(uri)).first()
+                val item = if (title.isNullOrEmpty() && artist.isNullOrEmpty()) {
+                    base
+                } else {
+                    base.buildUpon()
+                        .setMediaMetadata(
+                            base.mediaMetadata.buildUpon()
+                                .apply {
+                                    if (!title.isNullOrEmpty()) setTitle(title)
+                                    if (!artist.isNullOrEmpty()) setArtist(artist)
+                                }
+                                .build(),
+                        )
+                        .build()
+                }
                 PlayerController.play(item)
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {
@@ -164,15 +192,14 @@ class PlayerPlugin : Plugin() {
 
         App.scope.launch {
             try {
-                val items = (0 until uris.length()).map { i ->
-                    val uri = uris.getString(i)
-                    // Mirrors playTrack's MediaItem construction above so mediaId stays
-                    // consistent (mediaId == uri) across both the single-track and queue paths.
-                    MediaItem.Builder()
-                        .setUri(uri)
-                        .setMediaId(uri)
-                        .build()
-                }
+                // One MediaStore lookup for the whole queue, so every item carries its
+                // title/artist/album/artwork before it is ever played. Bare uri items made
+                // the notification lag a track behind at every transition (see
+                // TrackSource.mediaItemsFor). mediaId stays == uri, as in playTrack.
+                val items = TrackSource.mediaItemsFor(
+                    context,
+                    (0 until uris.length()).map { uris.getString(it) },
+                )
                 PlayerController.setQueue(items, startIndex)
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {

@@ -97,6 +97,12 @@ watch(player.lastError, (value) => {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  /* Landscape cutouts and curved edges inset the sides, never the content's own padding.
+     Top and bottom stay with the surfaces that own them: pages pad their own --safe-top so
+     they can still scroll under the status bar, and the tab bar pads its own --safe-bottom
+     so its background reaches the bottom of the screen. */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 .content {
