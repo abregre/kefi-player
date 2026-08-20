@@ -1,5 +1,7 @@
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from '../i18n'
+import { useLibrary } from '../composables/useLibrary'
 import { formatMs } from '../utils/format'
 
 const props = defineProps({
@@ -12,6 +14,17 @@ const props = defineProps({
 defineEmits(['select'])
 
 const { t } = useI18n()
+const { artwork } = useLibrary()
+
+/*
+ * The row shows the track's own cover, the same one the mini-player and Now Playing
+ * show. It does NOT fetch it: the `data-track-id` on the root is picked up by the
+ * list's `useLazyArtwork` observer, which loads covers as rows scroll into view.
+ * Until then — and forever, for a track with no embedded art — this is null and the
+ * token placeholder renders instead. `undefined` (not asked yet) and `null` (asked,
+ * has none) deliberately look the same here.
+ */
+const cover = computed(() => artwork.value[props.track.id] ?? null)
 </script>
 
 <template>
@@ -19,19 +32,28 @@ const { t } = useI18n()
     type="button"
     class="row track-row"
     :class="{ active: props.active }"
+    :data-track-id="props.track.id"
     @click="$emit('select', props.track)"
   >
-    <span class="marker" aria-hidden="true">
-      <!-- Three bars, animated only while this row is the one actually playing:
-           motion is the cheapest way to say "this is the sound you hear". -->
-      <span v-if="props.active" class="bars" :class="{ animate: props.playing }">
+    <span class="art">
+      <img v-if="cover" class="art-image" :src="cover" alt="" />
+      <span v-else class="art-placeholder" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="8.2" />
+          <circle cx="12" cy="12" r="2.1" />
+        </svg>
+      </span>
+      <!-- Three bars over the cover, animated only while this row is the one actually
+           playing: motion is the cheapest way to say "this is the sound you hear", and
+           laying it over the artwork keeps both facts visible at once. -->
+      <span
+        v-if="props.active"
+        class="bars"
+        :class="{ animate: props.playing }"
+        aria-hidden="true"
+      >
         <i /><i /><i />
       </span>
-      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-        <circle cx="9" cy="17.5" r="2.6" />
-        <circle cx="18" cy="15.5" r="2.6" />
-        <path d="M11.6 17.5V6.6l9-1.9v10.8" />
-      </svg>
     </span>
     <span class="body">
       <span class="title">{{ props.track.title }}</span>
@@ -58,34 +80,53 @@ const { t } = useI18n()
   background: var(--surface-1);
 }
 
-.marker {
+.art {
+  position: relative;
   flex-shrink: 0;
-  width: 1.5rem;
-  height: 1.5rem;
-  display: grid;
-  place-items: center;
-  color: var(--text-muted);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.45rem;
+  overflow: hidden;
+  background: var(--surface-2);
 }
 
-.row.active .marker {
+.art-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.art-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(150deg, var(--surface-2), var(--accent-soft));
   color: var(--accent);
 }
 
-.marker svg {
-  width: 1.35rem;
-  height: 1.35rem;
+.art-placeholder svg {
+  width: 55%;
+  height: 55%;
 }
 
 .bars {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: flex-end;
+  justify-content: center;
   gap: 2px;
-  height: 1rem;
+  padding-bottom: 0.55rem;
+  /* Scrim, so the bars stay legible over a bright cover as well as over the
+     placeholder. */
+  background: rgb(8 10 10 / 55%);
 }
 
 .bars i {
   width: 3px;
-  height: 40%;
+  height: 30%;
   border-radius: 1px;
   background: var(--accent);
 }

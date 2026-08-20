@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
+import { useLazyArtwork } from '../composables/useLazyArtwork'
 import TrackRow from '../components/TrackRow.vue'
 import AlbumGrid from '../components/AlbumGrid.vue'
 import ArtistList from '../components/ArtistList.vue'
@@ -25,6 +26,14 @@ const player = usePlayer()
 
 const TABS = ['songs', 'albums', 'artists']
 const tab = ref('songs')
+
+/*
+ * Song rows show their own cover, so the list needs the same lazy loader the album grid
+ * uses. The source includes `tab` because switching away and back remounts the <ul> with
+ * fresh (unobserved) rows even when the track list itself has not changed.
+ */
+const songList = ref(null)
+useLazyArtwork(songList, () => [tab.value, visibleTracks.value])
 
 onMounted(() => {
   // Resolves the permission first, then queries MediaStore only if it is granted —
@@ -143,7 +152,7 @@ function playGroup(group) {
       <p v-if="status === 'loading'" class="hint loading">{{ t('library.loading') }}</p>
 
       <template v-else>
-        <ul v-if="tab === 'songs'" class="list">
+        <ul v-if="tab === 'songs'" ref="songList" class="list">
           <li v-for="track in visibleTracks" :key="track.id">
             <TrackRow
               :track="track"

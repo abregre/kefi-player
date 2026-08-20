@@ -1,7 +1,8 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
+import { useLazyArtwork } from '../composables/useLazyArtwork'
 
 const props = defineProps({
   /** `{ key, name, tracks }[]` as produced by `useLibrary`'s `albums` computed. */
@@ -10,49 +11,12 @@ const props = defineProps({
 defineEmits(['select'])
 
 const { t } = useI18n()
-const { artwork, loadArtwork } = useLibrary()
+const { artwork } = useLibrary()
 
 const root = ref(null)
-/** @type {IntersectionObserver | null} */
-let observer = null
-
-/**
- * Artwork is a base64 JPEG crossing the Capacitor bridge, so cells fetch only once
- * they are (nearly) on screen — `rootMargin` starts the fetch a screenful early so
- * the image is usually there by the time the cell is actually visible. Each cell is
- * unobserved after its first hit; `useLibrary.loadArtwork` is itself idempotent, so a
- * re-render mid-scroll cannot double-fetch.
- */
-function observeCells() {
-  if (!observer || !root.value) return
-  observer.disconnect()
-  for (const cell of root.value.querySelectorAll('.cell[data-track-id]')) {
-    observer.observe(cell)
-  }
-}
-
-onMounted(() => {
-  observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue
-        const trackId = Number(entry.target.dataset.trackId)
-        if (Number.isFinite(trackId)) loadArtwork(trackId)
-        observer?.unobserve(entry.target)
-      }
-    },
-    { rootMargin: '200px' },
-  )
-  observeCells()
-})
-
-// Searching rebuilds the grid, so the fresh cells need observing too.
-watch(
-  () => props.albums,
-  () => nextTick(observeCells),
-)
-
-onBeforeUnmount(() => observer?.disconnect())
+// Cells carry data-track-id; the composable fetches covers as they come into view.
+// Searching rebuilds the grid, so it re-observes whenever `albums` changes.
+useLazyArtwork(root, () => props.albums)
 </script>
 
 <template>
