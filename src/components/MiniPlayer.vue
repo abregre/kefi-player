@@ -142,7 +142,7 @@ function toggle() {
   flex-shrink: 0;
   width: 2.5rem;
   height: 2.5rem;
-  border-radius: 0.45rem;
+    border-radius: 50%;
   overflow: hidden;
   background: var(--surface-2);
 }

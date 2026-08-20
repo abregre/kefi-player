@@ -78,10 +78,31 @@ object TrackSource {
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.SIZE,
         )
+        // `IS_MUSIC = 1` is necessary but nowhere near sufficient. Android's media scanner
+        // indexes by FILE EXTENSION, so anything an app happens to name `*.mp3` — a backup
+        // blob, an exported playlist — lands here as `mime_type=audio/mpeg, is_music=1`
+        // with a NULL duration. Reported from a real device on 2026-08-20: rows titled
+        // "autobackup…"/"autoplaylist…" that showed no length and would not play.
+        // Reproduced by scanning a text file named `autobackup_kefi.mp3`.
+        //
+        // `DURATION > 0` is the filter that matters, and NULL fails the comparison, which is
+        // exactly what should happen: without a duration the app cannot render a length, draw
+        // a seek bar or scrub, and ExoPlayer has nothing to play. The playlist mime types are
+        // denied by name as well — those are real "audio" mime types that are not audio.
+        val playlistMimeTypes = listOf(
+            "audio/x-mpegurl",
+            "audio/mpegurl",
+            "application/vnd.apple.mpegurl",
+            "audio/x-scpls",
+            "application/xspf+xml",
+        ).joinToString(",") { "'$it'" }
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND " +
             "${MediaStore.Audio.Media.IS_RINGTONE} = 0 AND " +
             "${MediaStore.Audio.Media.IS_ALARM} = 0 AND " +
-            "${MediaStore.Audio.Media.IS_NOTIFICATION} = 0"
+            "${MediaStore.Audio.Media.IS_NOTIFICATION} = 0 AND " +
+            "${MediaStore.Audio.Media.DURATION} > 0 AND " +
+            "(${MediaStore.Audio.Media.MIME_TYPE} IS NULL OR " +
+            "${MediaStore.Audio.Media.MIME_TYPE} NOT IN ($playlistMimeTypes))"
 
         val tracks = mutableListOf<Track>()
         context.contentResolver.query(collection, projection, selection, null, null)

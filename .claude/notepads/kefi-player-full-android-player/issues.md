@@ -139,3 +139,32 @@ Note for future UI work: 412dp/font_scale 1.0 (this emulator's default) does NOT
 this class of bug. Reproduce with `wm density 480` + `settings put system font_scale 1.3`, and
 add a temporary long-title fixture (`ffmpeg -metadata title=…`, push, `scan_file`, delete and
 `scan_volume` afterwards) — the committed fixtures stay at 3 on purpose.
+
+## Device feedback round 3 (2026-08-20) — two library issues
+### a) Song rows looked like a broken image
+The left of each row was an outline music-note SVG; on a real device it read as "trying to
+show an image and failing". Rows now show the track's own cover (the same lazily-loaded
+artwork the mini-player and Now Playing use), with the token placeholder when a file has
+none, and the playing bars laid over the cover behind a scrim so "this is the current track"
+survives. `AlbumGrid`'s private IntersectionObserver became
+`src/composables/useLazyArtwork.js`, shared by the grid and the list — artwork crosses the
+bridge as base64 JPEG, so a large library must never fetch covers for rows nobody scrolled to.
+The list re-observes on TAB change as well as on search, because switching away and back
+remounts the `<ul>` with fresh, unobserved rows.
+
+### b) Unplayable "autobackup…"/"autoplaylist…" rows in the library
+**Cause: Android's media scanner indexes by FILE EXTENSION, not by content.** Anything an app
+names `*.mp3` — a backup blob, an exported playlist — is inserted into `MediaStore.Audio.Media`
+as `mime_type=audio/mpeg, is_music=1` with a **NULL duration**. `TrackSource`'s selection only
+filtered `IS_MUSIC/IS_RINGTONE/IS_ALARM/IS_NOTIFICATION`, so those rows were listed, showed
+`--:--` (formatDuration's junk-input output) and could not play.
+Reproduced on the emulator in one step: `printf 'not audio' > autobackup_kefi.mp3`, push,
+`scan_file` → the row appears exactly as described, and `listTracks` returned 5 tracks.
+Fix: `DURATION > 0` in the selection (NULL fails the comparison, which is the correct
+outcome — with no duration there is no length to render, no seek bar to draw and nothing for
+ExoPlayer to play), plus a deny-list of playlist mime types that are nominally "audio".
+**The two baits are now part of the fixture set** (`scripts/qa-fixtures.sh` creates
+`autobackup_kefi.mp3` / `autoplaylist_kefi.mp3` and scans them), and `verify()` there asserts
+they ARE in MediaStore rather than counting rows — filtering them is the app's job.
+`scripts/qa-playback.sh` gained the matching check: MediaStore holds ≥2 such rows and
+`listTracks` returns exactly 3 with none of them unplayable. Suite is now 36 checks.

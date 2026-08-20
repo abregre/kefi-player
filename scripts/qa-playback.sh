@@ -156,6 +156,25 @@ TRACKS=$(player "listTracks()")
 if [[ "$TRACKS" == __CDP_ERROR__* ]]; then
   abort "listTracks failed: ${TRACKS#__CDP_ERROR__}"
 fi
+# The fixture set deliberately includes two files with an audio extension over content
+# that is not audio (see scripts/qa-fixtures.sh). MediaStore indexes them by extension with
+# a NULL duration, and the library must not show them: on a real device they appeared as
+# unplayable "autobackup…"/"autoplaylist…" rows with no length (2026-08-20).
+MEDIASTORE_ROWS=$("${EMU[@]}" shell content query --uri content://media/external/audio/media \
+  --projection title --where "is_music=1" 2>/dev/null | grep -c "title=auto")
+LISTED=$(node -e 'const { tracks } = JSON.parse(process.argv[1]); console.log(tracks.length)' "$TRACKS")
+LISTED_JUNK=$(node -e '
+  const { tracks } = JSON.parse(process.argv[1])
+  console.log(tracks.filter((t) => /^auto(backup|playlist)/.test(t.title) || !t.durationMs).length)
+' "$TRACKS")
+if [[ "$MEDIASTORE_ROWS" -lt 2 ]]; then
+  fail "the unplayable baits are missing from MediaStore — run npm run fixtures (found $MEDIASTORE_ROWS)"
+else
+  [[ "$LISTED_JUNK" == 0 && "$LISTED" == 3 ]] &&
+    pass "listTracks filtered out $MEDIASTORE_ROWS unplayable MediaStore rows and returned exactly 3" ||
+    fail "listTracks returned $LISTED tracks of which $LISTED_JUNK are unplayable (expected 3 and 0)"
+fi
+
 URIS=$(node -e '
   const wanted = ["Άσπρη Μέρα", "Zeibekiko", "Ωδή"]
   const { tracks } = JSON.parse(process.argv[1])

@@ -81,6 +81,15 @@ ffmpeg -y -hide_banner -loglevel error \
 
 rm -f "$LOCAL_DIR/cover.png"
 
+# Two DELIBERATELY BROKEN files: an audio extension over content that is not audio.
+# Android's media scanner indexes by extension, so these land in MediaStore as
+# `mime_type=audio/mpeg, is_music=1` with a NULL duration — which is exactly how a real
+# device ended up listing unplayable "autobackup…"/"autoplaylist…" rows (2026-08-20).
+# They are bait for TrackSource's `DURATION > 0` filter: the library must show 3 tracks
+# while MediaStore holds 5 audio rows. Named after the real culprits on purpose.
+printf 'not audio, a backup blob that happens to end in .mp3\n' > "$LOCAL_DIR/autobackup_kefi.mp3"
+printf '#EXTM3U\n%s/f1.%s\n' "$REMOTE_DIR" "$EXT" > "$LOCAL_DIR/autoplaylist_kefi.mp3"
+
 echo
 echo "Generated fixtures:"
 ls -la "$LOCAL_DIR"
@@ -96,17 +105,18 @@ done
 "${ADB[@]}" shell mkdir -p "$REMOTE_DIR"
 "${ADB[@]}" push "$LOCAL_DIR/." "$REMOTE_DIR/"
 
-# Verification helper: query MediaStore and check for exactly 3 correctly
-# tagged rows with the expected durations (within 1500ms).
+# Verification helper: query MediaStore and check the 3 playable fixtures are there with
+# the expected durations (within 1500ms), and that both broken-file baits got indexed too.
+# NOT a total row count: the baits are supposed to be in MediaStore — filtering them out is
+# the app's job, and `scripts/qa-playback.sh` asserts that it happens.
 verify() {
   local out
   out=$("${ADB[@]}" shell content query --uri content://media/external/audio/media \
     --projection title:artist:album:duration --where "is_music=1" 2>/dev/null || true)
   VERIFY_OUTPUT="$out"
 
-  local rows
-  rows=$(printf '%s\n' "$out" | grep -c "^Row: " || true)
-  [[ "$rows" -eq 3 ]] || return 1
+  printf '%s\n' "$out" | grep -q "title=autobackup_kefi" || return 1
+  printf '%s\n' "$out" | grep -q "title=autoplaylist_kefi" || return 1
 
   printf '%s\n' "$out" | grep -q "title=Άσπρη Μέρα" || return 1
   printf '%s\n' "$out" | grep -q "title=Zeibekiko" || return 1
@@ -134,6 +144,10 @@ for f in f1 f2 f3; do
   "${ADB[@]}" shell content call --uri content://media --method scan_file \
     --arg "$REMOTE_DIR/$f.$EXT" >/dev/null 2>&1 || true
 done
+for f in autobackup_kefi.mp3 autoplaylist_kefi.mp3; do
+  "${ADB[@]}" shell content call --uri content://media --method scan_file \
+    --arg "$REMOTE_DIR/$f" >/dev/null 2>&1 || true
+done
 sleep 2
 if verify; then
   SCAN_METHOD="content call --uri content://media --method scan_file --arg <path> (per file)"
@@ -160,7 +174,7 @@ fi
 
 if [[ -z "$SCAN_METHOD" ]]; then
   echo "FAIL: none of the scan methods (scan_file, scan_volume, jobscheduler) produced" >&2
-  echo "FAIL: 3 correctly-tagged MediaStore rows. Last query output:" >&2
+  echo "FAIL: the 3 tagged fixtures plus the 2 broken-file baits. Last query output:" >&2
   echo "${VERIFY_OUTPUT:-<empty>}" >&2
   exit 1
 fi
@@ -171,4 +185,4 @@ echo
 echo "Final content query output:"
 echo "$VERIFY_OUTPUT"
 echo
-echo "OK: 3 fixtures indexed correctly."
+echo "OK: 3 fixtures indexed correctly, plus 2 unplayable baits for the library filter."

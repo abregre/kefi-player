@@ -55,7 +55,7 @@ speed, a home-screen widget, an equalizer, streaming or any network use at all.
 | `npm run dev:android` | Live-reload on device against the dev server |
 | `npm run open` | Open the project in Android Studio (snap path) |
 | `npm run qa` | Scripted playback QA against a device (see below) |
-| `npm run fixtures` | (Re)create and index the three QA audio fixtures on a device |
+| `npm run fixtures` | (Re)create and index the QA audio fixtures on a device |
 
 `install:apk` is *not* called `install`: `npm run install` collides with npm's own
 `install` lifecycle script and runs at unexpected times.
@@ -79,8 +79,8 @@ The Library screen renders three distinct states rather than a blank list:
 ## QA
 
 ```bash
-npm run fixtures          # push + index 3 deterministic audio fixtures (needs ffmpeg)
-npm run qa                # 35 scripted checks; exits non-zero on any FAIL
+npm run fixtures          # push + index 3 audio fixtures, plus 2 unplayable baits (needs ffmpeg)
+npm run qa                # 36 scripted checks; exits non-zero on any FAIL
 bash scripts/qa-playback.sh 1a2b3c4d   # ...against a specific adb serial
 ```
 
