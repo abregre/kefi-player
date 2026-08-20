@@ -11,6 +11,12 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // scripts/build-apk.sh passes -PabiFilters=<comma-separated list> to restrict native
+            // ABIs; default to arm64-v8a only when it's absent (covers essentially all phones
+            // from ~2018 on, and keeps the APK from also carrying an x86_64 copy of yt-dlp/ffmpeg).
+            abiFilters.addAll(project.findProperty('abiFilters')?.split(',') ?: ['arm64-v8a'])
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -76,6 +82,20 @@ android {
     kotlinOptions {
         jvmTarget = '21'
     }
+
+    packaging {
+        jniLibs {
+            // youtubedl-android smuggles its Python/ffmpeg payloads in as
+            // lib*.zip.so files and unzips them at first launch. AGP defaults to
+            // uncompressed, un-extracted native libs, which leaves those payloads
+            // unreachable and makes YoutubeDL.init() fail. Legacy packaging puts
+            // them back on disk where the library expects them.
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
+    }
 }
 
 repositories {
@@ -93,6 +113,13 @@ dependencies {
     // Media3: exoplayer for audio playback, session for notification/lock-screen controls.
     implementation "androidx.media3:media3-exoplayer:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
+    // yt-dlp + a bundled Python runtime, and the matching ffmpeg build. This is
+    // the actively-maintained fork (the one Seal uses); the original arthenica
+    // ffmpeg-kit was retired and its binaries pulled from Maven Central on
+    // 2025-04-01, so ffmpeg comes from here instead.
+    implementation "io.github.junkfood02.youtubedl-android:library:$youtubedlAndroidVersion"
+    implementation "io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroidVersion"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

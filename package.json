@@ -7,12 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "sync": "npm run build && npx cap sync android",
+    "sync": "npm run build && npm run build:potoken && npx cap sync android",
     "apk": "bash scripts/build-apk.sh debug",
     "apk:release": "bash scripts/build-apk.sh release",
     "install:apk": "adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "open": "CAPACITOR_ANDROID_STUDIO_PATH=/snap/bin/android-studio npx cap open android",
     "dev:android": "npx cap run android --live-reload --external",
+    "build:potoken": "vite build --config vite.potoken.config.ts",
     "icons": "python3 scripts/make-icons.py",
     "fonts": "python3 scripts/fetch-fonts.py",
     "keystore": "bash scripts/make-keystore.sh",
@@ -24,12 +25,14 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
     "@capacitor/preferences": "^8.0.1",
+    "bgutils-js": "^4.0.3",
     "vue": "^3.5.40",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
     "@vitejs/plugin-vue": "^6.0.8",
+    "typescript": "~6.0.2",
     "vite": "^8.2.0"
   }
 }

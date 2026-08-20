@@ -183,6 +183,7 @@ async function addWidget() {
   margin: 0;
   font-size: 0.85rem;
   line-height: 1.45;
+  user-select: none;
 }
 
 .app-name {

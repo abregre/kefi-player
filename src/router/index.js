@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { App as CapacitorApp } from '@capacitor/app'
+import DownloaderView from '../views/DownloaderView.vue'
 import LibraryView from '../views/LibraryView.vue'
 import NowPlayingView from '../views/NowPlayingView.vue'
 import SettingsView from '../views/SettingsView.vue'
@@ -17,6 +18,10 @@ export const router = createRouter({
     { path: '/library', name: 'library', component: LibraryView },
     { path: '/now-playing', name: 'nowPlaying', component: NowPlayingView },
     { path: '/settings', name: 'settings', component: SettingsView },
+    // Reachable by typing the hash only — intentionally no navigation guard here yet.
+    // The tab and the unlock check that gates it both land together in a later task;
+    // until then this route exists purely so the screen can be QA'd on its own.
+    { path: '/downloader', name: 'downloader', component: DownloaderView },
     // Anything unknown (a stale hash after an update) lands on the default tab
     // rather than a blank screen.
     { path: '/:pathMatch(.*)*', redirect: '/library' },

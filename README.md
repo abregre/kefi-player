@@ -5,7 +5,8 @@ wrapped by Capacitor; the playback engine is native (Media3) behind a Capacitor
 plugin.
 
 The web layer is plain **JavaScript, not TypeScript** — deliberate: the sibling
-project `../ytmp3` is TypeScript, this one is not.
+project `../ytmp3` is TypeScript, this one is not. `src/potoken/index.ts` is the
+one deliberate exception; see below.
 
 ## What the app does
 
@@ -129,6 +130,22 @@ nobody who already installed the app can ever update it.
 
 Without a keystore, `npm run apk` (debug) still works; only release builds need one.
 
+## The PO-token bundle (the one TypeScript file)
+
+`src/potoken/index.ts`, built by `vite.potoken.config.ts` into
+`android/app/src/main/assets/potoken/potoken.js`, is the single exception to the
+no-TypeScript rule above. It mints YouTube PO tokens by running Google's BotGuard
+VM — an obfuscated JS blob that has to execute inside a real browser engine —
+inside an offscreen WebView with a `https://www.youtube.com` origin, something
+that cannot be done from Kotlin or Python. It is copied verbatim from `../ytmp3`
+and built as a standalone IIFE with no imports, because the native
+`PoTokenGenerator` inlines it as text into an HTML page; a cross-origin
+`<script src>` would be blocked. It is **opt-in and off by default** (forcing the
+`web` client currently lands on YouTube's SABR-only delivery, which the download
+engine can't handle yet). If you change `src/potoken/index.ts`, rebuild it with
+`npm run build:potoken` — `npm run sync` and `npm run apk`/`apk:release` already
+do this for you, so a plain `npm run build` is the only path that skips it.
+
 ## Android facts worth knowing before editing
 
 - `applicationId` / `appId` is **`com.kefi.player`** and must not change: Android
@@ -205,6 +222,7 @@ src/
                      usePlayer (native snapshot), useLibrary (MediaStore + search)
   i18n/              hand-rolled t()/setLocale over two flat dictionaries
   plugins/           JS wrappers over Capacitor plugins
+  potoken/           index.ts — the one TypeScript file, see above
   router/            hash-history routes + the Android back button
   utils/             pure helpers
   views/             LibraryView, NowPlayingView, SettingsView

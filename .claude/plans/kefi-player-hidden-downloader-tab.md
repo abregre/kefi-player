@@ -156,14 +156,17 @@ remains **read-only** for this work.
 
 ### Phase A — measure before building
 
-- [ ] **T1: Baseline capture**
+- [x] **T1: Baseline capture**
   - Files: none (records only, into `.claude/notepads/kefi-player-hidden-downloader-tab/learnings.md`).
   - Record: `npm run qa` result (expect `38/38`), `du -b` of both current APKs, and
     `adb -s emulator-5554 shell getprop ro.product.cpu.abilist`.
   - QA Scenario: `npm run qa` exits `0` and prints `38/38 checks passed`; the notepad file
     exists and contains the three numbers.
 
-- [ ] **T2: Can the emulator exec an arm64 binary?**
+- [x] **T2: Can the emulator exec an arm64 binary?** — **VERDICT: EXEC-OK** (2026-08-20).
+  `ro.enable.native.bridge.exec=1`; an arm64 `libqjs.so` ran on `emulator-5554` and evaluated
+  `1+1` → `2`. Downloader QA is therefore NOT device-only: T18 gates on capability, and the
+  emulator passes that gate.
   - Files: `.claude/notepads/.../learnings.md` (findings only).
   - The AVD reports `x86_64,arm64-v8a` in `ro.product.cpu.abilist`, but that covers install
     matching and JNI translation — NOT `exec()` of a standalone ARM64 ELF, which is exactly
@@ -178,7 +181,7 @@ remains **read-only** for this work.
 
 ### Phase B — native plumbing, nothing reachable
 
-- [ ] **T3: Merge `App.kt`**
+- [x] **T3: Merge `App.kt`**
   - Files: `android/app/src/main/java/com/kefi/player/App.kt`.
   - Pattern: keep the existing file's shape (`kefi-player/.../App.kt:20-30`); add
     `downloadScope` as a second `CoroutineScope(SupervisorJob() + Dispatchers.IO)` and copy
@@ -189,7 +192,7 @@ remains **read-only** for this work.
     `grep -c "ensureNativeToolsReady" android/app/src/main/java/com/kefi/player/App.kt` = 1
     while `grep -c "ensureNativeToolsReady" .../MainActivity.java` = 0 (proof it stayed lazy).
 
-- [ ] **T4: Gradle — dependencies, packaging, ABI**
+- [x] **T4: Gradle — dependencies, packaging, ABI**
   - Files: `android/variables.gradle`, `android/app/build.gradle`.
   - Add `youtubedlAndroidVersion = '0.18.1'`; add `io.github.junkfood02.youtubedl-android:library`
     and `:ffmpeg`, `androidx.documentfile:documentfile:1.1.0`,
@@ -203,7 +206,7 @@ remains **read-only** for this work.
     prints `1`; `unzip -l ... | grep -c 'lib/x86_64/'` prints `0`; the APK still installs
     (`$EMU install -r` → `Success`) and `npm run qa` is `38/38`.
 
-- [ ] **T5: Notification identity — kill the 1001 collision**
+- [x] **T5: Notification identity — kill the 1001 collision**
   - Files: `android/app/src/main/java/com/kefi/player/PlaybackService.kt`,
     NEW `.../DownloadService.kt`.
   - `DefaultMediaNotificationProvider`'s default id is 1001 (decompiled from
@@ -214,7 +217,7 @@ remains **read-only** for this work.
     service through `adb shell am start-foreground-service`), `$EMU shell dumpsys notification --noredact | grep -c "pkg=com.kefi.player"`
     is `2`, and the two records show different ids. `npm run qa` `38/38`.
 
-- [ ] **T6: Port the downloader's native files**
+- [x] **T6: Port the downloader's native files**
   - Files: NEW `android/app/src/main/java/com/kefi/player/{YtdlpPlugin.kt,DownloadService.kt,MediaStoreExporter.kt,StorageExporter.kt,PoTokenGenerator.kt,SharedUrlHolder.kt}`;
     NEW `android/app/src/main/res/xml/file_paths.xml` if absent.
   - Package renamed to `com.kefi.player`; `App.scope` references become `App.downloadScope`.
@@ -224,10 +227,16 @@ remains **read-only** for this work.
     resolve payloads, event names, `humanError()` mapping, the `"CANCELLED"` code — is copied
     verbatim from `$SRC/android/app/src/main/java/com/ytmp3/app/YtdlpPlugin.kt`.
   - QA Scenario: `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` prints
-    `0`; `grep -c "pickStorageLocation\|clearStorageLocation\|StorageLocation" android/app/src/main/java/com/kefi/player/*.kt`
-    prints `0`; `npm run qa` `38/38`.
+    `0`; the SAF picker is absent AS CODE:
+    `grep -rn "fun pickStorageLocation\|fun clearStorageLocation\|import androidx.documentfile" android/app/src/main/java/ | wc -l`
+    prints `0`, `android/app/src/main/java/com/kefi/player/StorageLocation.kt` does not exist, and
+    `grep -c documentfile android/app/build.gradle` prints `0`. `npm run qa` `38/38`.
+    (Corrected twice on 2026-08-20. First wording grepped for `StorageLocation`, which the
+    deliberately-kept `getStorageLocation` contains as a substring. Second wording still matched
+    the COMMENTS that document the omission — which are exactly what should be there. A criterion
+    must test the code, not the prose about it.)
 
-- [ ] **T7: Manifest — permissions, service, share alias (disabled)**
+- [x] **T7: Manifest — permissions, service, share alias (disabled)**
   - Files: `android/app/src/main/AndroidManifest.xml`.
   - Add the three permissions, the `DownloadService` (`exported="false"`,
     `foregroundServiceType="dataSync"`), and:
@@ -239,7 +248,7 @@ remains **read-only** for this work.
     `$EMU shell cmd package query-activities -a android.intent.action.SEND -t text/plain | grep -c com.kefi.player`
     prints `0`.
 
-- [ ] **T8: `MainActivity` — second plugin, shared URLs**
+- [x] **T8: `MainActivity` — second plugin, shared URLs**
   - Files: `android/app/src/main/java/com/kefi/player/MainActivity.java`.
   - `registerPlugin(YtdlpPlugin.class)` next to the existing `registerPlugin(PlayerPlugin.class)`
     **before** `super.onCreate` (`MainActivity.java:22`), keep the existing WebViewListener and
@@ -253,7 +262,7 @@ remains **read-only** for this work.
 
 ### Phase C — the web layer, reachable only by typing the route
 
-- [ ] **T9: Plugin bridge + web mock in plain JS**
+- [x] **T9: Plugin bridge + web mock in plain JS**
   - Files: NEW `src/plugins/ytdlp.js`, NEW `src/plugins/ytdlp.web.js`.
   - Convert `$SRC/src/plugins/ytdlp.ts` and `ytdlp.web.ts`: TS types become JSDoc `@typedef`s,
     exactly as `src/plugins/player.js` already does. The web mock keeps its fake progress loop —
@@ -262,7 +271,7 @@ remains **read-only** for this work.
     `find src -name "*.ts" | wc -l` prints `0` (the potoken bundle arrives in T15 and lives
     under `src/potoken/`, which this check must then exclude — see F4).
 
-- [ ] **T10: `useDownloads.js`**
+- [x] **T10: `useDownloads.js`**
   - Files: NEW `src/composables/useDownloads.js`.
   - Convert `$SRC/src/composables/useDownloads.ts` to plain JS + JSDoc, keeping the
     module-level singleton shape (identical to `src/composables/usePlayer.js:12-35`), the
@@ -274,7 +283,7 @@ remains **read-only** for this work.
     drives a job to `done` with `progress` reaching 100 — asserted in T17's suite through the
     CDP bridge, not by hand.
 
-- [ ] **T11: Downloader UI**
+- [x] **T11: Downloader UI**
   - Files: NEW `src/views/DownloaderView.vue`, NEW `src/components/JobCard.vue`.
   - Port the composer (URL field + paste, look-up, preview card, bitrate chips, primary
     action), the jobs list and the engine/update line from `$SRC/src/App.vue:179-302` and
@@ -284,7 +293,7 @@ remains **read-only** for this work.
   - QA Scenario: with the route reachable, the CDP suite finds `.downloader-page`, exactly 3
     bitrate chips, and a disabled primary button while the URL field is empty.
 
-- [ ] **T12: Strings**
+- [x] **T12: Strings**
   - Files: `src/i18n/en.js`, `src/i18n/el.js`.
   - Every literal from T11 as `downloader.*` keys in BOTH dictionaries; Greek written with
     correct accents (the document `lang` already fixes uppercase rendering).
@@ -292,20 +301,20 @@ remains **read-only** for this work.
     returns nothing; `node -e "const en=..., el=...; process.exit(Object.keys(en).every(k=>k in el)?0:1)"`
     exits `0`.
 
-- [ ] **T13: Route, still hidden**
+- [x] **T13: Route, still hidden**
   - Files: `src/router/index.js`.
   - Add `/downloader → DownloaderView`, ABOVE the catch-all. No tab yet, no guard yet — this
     task exists so Phase C can be QA'd before the easter egg is written.
   - QA Scenario: `location.hash = '#/downloader'` renders the view; `npm run qa` `38/38`.
 
-- [ ] **T14: Merge the format helpers**
+- [x] **T14: Merge the format helpers**
   - Files: `src/utils/format.js`.
   - Add `formatEta`, `formatBytes`, `looksLikeUrl`, `looksLikeYoutube` from
     `$SRC/src/utils/format.ts`. `formatDuration` is already identical here — do not duplicate it.
   - QA Scenario: `node -e "import('./src/utils/format.js').then(m=>{...})"` asserts
     `formatBytes(0) === ''`, `formatEta(90) === '2m left'`, `looksLikeYoutube('https://youtu.be/x') === true`.
 
-- [ ] **T15: The PO-token bundle (the one TypeScript exception)**
+- [x] **T15: The PO-token bundle (the one TypeScript exception)**
   - Files: NEW `src/potoken/index.ts`, NEW `vite.potoken.config.ts`, `package.json`,
     `scripts/build-apk.sh`, `README.md`.
   - Copy both verbatim (output path `android/app/src/main/assets/potoken/potoken.js`), add
@@ -404,7 +413,11 @@ remains **read-only** for this work.
 11. After `am force-stop com.kefi.player` and relaunch: still `3` tabs (persistence)
 12. 9 taps, and 10 taps spread over 16 s, both leave `document.querySelectorAll('.tab').length` → `2`
 13. `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" -not -path "./src/potoken/*" -not -name "vite.potoken.config.ts" | wc -l` → `0`
-14. `grep -rn "StorageLocation\|pickStorageLocation\|clearStorageLocation" src/ android/app/src/main/java/ | wc -l` → `0`
+14. `grep -rn "fun pickStorageLocation\|fun clearStorageLocation\|import androidx.documentfile" android/app/src/main/java/ | wc -l` → `0`;
+    `grep -rn "\.pickStorageLocation(\|\.clearStorageLocation(" src/ | wc -l` → `0`;
+    `ls android/app/src/main/java/com/kefi/player/StorageLocation.kt` reports no such file;
+    `grep -c documentfile android/app/build.gradle` → `0`
+    (`getStorageLocation` and the comments explaining the omission legitimately survive)
 15. `grep -c "ensureNativeToolsReady" android/app/src/main/java/com/kefi/player/App.kt` → `1`,
     and `grep -rc "ensureNativeToolsReady" android/app/src/main/java/com/kefi/player/MainActivity.java` → `0`
 16. `find /mnt/X/myProjects/ytmp3 -newermt "$(date +%Y-%m-%d)" -not -path "*/node_modules/*" -not -path "*/.gradle/*" -type f | wc -l` → `0`

@@ -1,5 +1,6 @@
 package com.kefi.player;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.webkit.RenderProcessGoneDetail;
@@ -15,7 +16,9 @@ public class MainActivity extends BridgeActivity {
         // Plugins that live in the app module are not auto-discovered the way
         // npm-installed ones are, and must be registered before the bridge starts.
         registerPlugin(PlayerPlugin.class);
+        registerPlugin(YtdlpPlugin.class);
         super.onCreate(savedInstanceState);
+        captureSharedUrl(getIntent());
 
         // A backgrounded music player spends most of its life with the screen off,
         // which is exactly when Android is most likely to reclaim the WebView's
@@ -36,5 +39,20 @@ public class MainActivity extends BridgeActivity {
                 return true;
             }
         });
+    }
+
+    /** Fired instead of onCreate when the app is already running (launchMode singleTask). */
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureSharedUrl(intent);
+    }
+
+    private void captureSharedUrl(Intent intent) {
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) {
+            return;
+        }
+        SharedUrlHolder.INSTANCE.offer(intent.getStringExtra(Intent.EXTRA_TEXT));
     }
 }

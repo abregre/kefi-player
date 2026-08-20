@@ -77,6 +77,14 @@ class PlaybackService : MediaSessionService() {
             DefaultMediaNotificationProvider.Builder(this)
                 .setChannelId("playback")
                 .setChannelName(R.string.playback_channel_name)
+                // 1001 is Media3's own DefaultMediaNotificationProvider default (confirmed
+                // by decompiling media3-session-1.11.0); pinned here explicitly so it is
+                // visible rather than implicit. DownloadService deliberately uses 2001,
+                // NOT this id: notification ids are per-package, not per-service, and the
+                // two foreground services can be running at the same time (music playing
+                // while a download runs) — sharing an id would make one notification
+                // silently replace the other in the shade.
+                .setNotificationId(1001)
                 .build()
         )
 

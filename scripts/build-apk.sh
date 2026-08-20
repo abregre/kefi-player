@@ -57,6 +57,9 @@ echo "Variant:     $VARIANT"
 echo
 
 npm run build
+# ytmp3's own build-apk.sh omits this and silently ships a stale potoken.js;
+# rebuild it here so the WebView bundle always matches src/potoken/index.ts.
+npm run build:potoken
 npx cap sync android
 
 case "$VARIANT" in
