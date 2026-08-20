@@ -1414,3 +1414,19 @@ Source: 1254x1254 RGBA, a circular neon headphone/vinyl logo with **transparent 
   re-screenshotting the splash after quantisation.
 Verified on device: the Android 12+ splash shows the logo centred on `#14100F`; the launcher
 drawer shows it filling the circular mask; `npm run qa` still 35/35.
+
+## Icon swap to `~/Pictures/kefi-4.png` (2026-08-20)
+Same shape as kefi-2 (1254x1254, circular, transparent corners) in a green/yellow/red palette.
+Regenerated with `npm run icons ~/Pictures/kefi-4.png`; one more heuristic bug surfaced and was
+fixed in `scripts/make-icons.py`:
+- **`sample_background()` picked `#F41A12`** — saturated red — because two of its edge probes
+  landed on the logo's own neon ring rather than on empty space, the circle nearly filling its
+  canvas. A bright red adaptive background would have shown as red corners behind the icon
+  under any mask wider than the logo. (The same flaw was silently benign on kefi-2, where it
+  produced a dark navy that happened to look fine.)
+- Fix: NEW `is_pre_cut(art)` runs FIRST and averages the alpha channel over four 14% corner
+  squares; below 32 the artwork has no background of its own and `BRAND_BG` is used. Averaging
+  over an area, not single pixels, so one antialiased pixel cannot swing the verdict.
+  Result: `ic_launcher_background` and `splash_background` are now both `#14100F`.
+Verified on device: Android 12+ splash and launcher-drawer icon both correct; `npm run qa`
+35/35; debug APK 8.6MB.

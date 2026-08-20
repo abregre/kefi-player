@@ -147,13 +147,14 @@ Without a keystore, `npm run apk` (debug) still works; only release builds need 
 - `npm run fonts` re-downloads Inter + Roboto (Latin, Latin Ext, Greek) into
   `src/assets/fonts/`. Bundled, not linked, because the app runs in an offline
   WebView.
-- `npm run icons ~/Pictures/kefi-2.png` regenerates **every icon and both splash
+- `npm run icons ~/Pictures/kefi-4.png` regenerates **every icon and both splash
   screens** from one square source image (the current app icon is
-  `~/Pictures/kefi-2.png`):
+  `~/Pictures/kefi-4.png`):
   - `mipmap-*/ic_launcher{,_round,_foreground}.png` for every density. The adaptive
     foreground is inset to 72/108 of its layer — the part every launcher mask is
-    guaranteed to show — and the adaptive background colour is sampled from the
-    artwork, falling back to `BRAND_BG` when the source has transparent corners.
+    guaranteed to show. The adaptive background colour is sampled from the artwork
+    only when the artwork actually has a background; a source with transparent
+    corners (any pre-cut round logo) gets `BRAND_BG` instead.
   - `drawable-nodpi/splash_icon.png` (288dp canvas, artwork in the inner 192dp) plus
     the `splash_background` colour, which is what **Android 12+** composes its splash
     from. The `windowSplashScreen*` attributes in `res/values/styles.xml` point at them.

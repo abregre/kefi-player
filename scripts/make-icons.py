@@ -60,8 +60,40 @@ BACKGROUND_PROBES = [
     (0.88, 0.13), (0.91, 0.30), (0.50, 0.07),
 ]
 
+# Corner squares used to decide whether the artwork is pre-cut (see is_pre_cut).
+CORNER_FRACTION = 0.14
+
+
+def is_pre_cut(art: Image.Image) -> bool:
+    """True when the artwork has no background of its own, i.e. its corners are transparent.
+
+    A round logo is the common case, and its corners being empty is the whole point. Asking
+    this FIRST matters: `sample_background`'s probes sit close to the edge, so on a circle
+    that nearly fills its canvas some of them land on the artwork's own outline instead of on
+    empty space. That is how `kefi-4.png` — a green/yellow/red ring — produced a saturated
+    #F41A12 adaptive background, which would have shown as bright red corners behind the icon
+    under any mask wider than the logo.
+    """
+    w, h = art.size
+    box = (int(w * CORNER_FRACTION), int(h * CORNER_FRACTION))
+    corners = [
+        (0, 0, box[0], box[1]),
+        (w - box[0], 0, w, box[1]),
+        (0, h - box[1], box[0], h),
+        (w - box[0], h - box[1], w, h),
+    ]
+    alpha = art.getchannel("A")
+    means = [statistics.mean(alpha.crop(c).getdata()) for c in corners]
+    # Averaged over a real area rather than single pixels, so one stray antialiased pixel
+    # cannot swing the verdict.
+    return statistics.mean(means) < 32
+
 
 def sample_background(art: Image.Image) -> tuple[int, int, int]:
+    if is_pre_cut(art):
+        # There is no artwork background to match, so the brand background is the only
+        # non-arbitrary choice — and it is what the rest of the app paints anyway.
+        return BRAND_BG
     w, h = art.size
     seen = []
     for fx, fy in BACKGROUND_PROBES:
@@ -69,9 +101,6 @@ def sample_background(art: Image.Image) -> tuple[int, int, int]:
         if pixel[3] > 200:
             seen.append(pixel[:3])
     if not seen:
-        # Every probe landed on transparency, which is what a pre-cut logo (round or
-        # otherwise) looks like at the corners. Black would be an arbitrary choice; the
-        # brand background is the one that matches the rest of the app.
         return BRAND_BG
     return tuple(int(statistics.median(c[i] for c in seen)) for i in range(3))
 
