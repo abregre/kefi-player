@@ -2,10 +2,13 @@
 // Bottom tab bar. Only the two top-level destinations live here (Must Have 9);
 // Now Playing is reached from the mini-player (T17), not from a tab, so the bar
 // keeps the two-target shape a music library actually needs.
-// TODO(T14): labels become t('tab.library') / t('tab.settings').
+import { useI18n } from '../i18n'
+
+const { t } = useI18n()
+
 const tabs = [
-  { to: '/library', label: 'Library' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/library', key: 'tab.library' },
+  { to: '/settings', key: 'tab.settings' },
 ]
 </script>
 
@@ -25,7 +28,7 @@ const tabs = [
           <path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7" />
         </svg>
       </span>
-      <span class="label">{{ tab.label }}</span>
+      <span class="label">{{ t(tab.key) }}</span>
     </RouterLink>
   </nav>
 </template>

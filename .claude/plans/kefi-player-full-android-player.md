@@ -464,7 +464,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     `dumpsys activity activities | grep mResumedActivity` still naming `com.kefi.player`; at
     `/library`, `KEYCODE_BACK` backgrounds the app.
 
-- [ ] **T14: Bilingual UI (el/en)**
+- [x] **T14: Bilingual UI (el/en)**
   - Files: NEW `src/i18n/index.js`, `src/i18n/el.js`, `src/i18n/en.js`;
     `src/views/SettingsView.vue`; `src/main.js`.
   - A hand-rolled composable (`useI18n()` exposing `t(key)` and `setLocale(code)`) over two

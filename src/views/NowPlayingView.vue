@@ -1,12 +1,16 @@
 <script setup>
+import { useI18n } from '../i18n'
+
+const { t } = useI18n()
+
 // TODO(T18): artwork, seek bar, transport, shuffle and repeat controls.
 // Reached from the mini-player (T17), which is why it has no tab of its own.
 </script>
 
 <template>
   <section class="page">
-    <h1 class="page-title">Now Playing</h1>
-    <p class="hint">The full player lands here.</p>
+    <h1 class="page-title">{{ t('nowPlaying.title') }}</h1>
+    <p class="hint">{{ t('nowPlaying.empty.body') }}</p>
   </section>
 </template>
 

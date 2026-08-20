@@ -1,12 +1,15 @@
 <script setup>
+import { useI18n } from '../i18n'
+
+const { t } = useI18n()
+
 // TODO(T15/T16/T19): Songs/Albums/Artists, search, and the empty/permission states.
 // T13 owns only the route + the page chrome the shell needs to be navigable.
 </script>
 
 <template>
   <section class="page">
-    <h1 class="page-title">Library</h1>
-    <p class="hint">Songs, albums and artists land here.</p>
+    <h1 class="page-title">{{ t('library.title') }}</h1>
   </section>
 </template>
 

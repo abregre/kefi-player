@@ -1116,3 +1116,25 @@ smooth bar with zero extra IPC.
   with `topResumedActivity=com.kefi.player/.MainActivity` still ✓; `KEYCODE_BACK` at `/library` →
   `topResumedActivity=com.google.android.apps.nexuslauncher` and zero `com.kefi.player` activity
   records ✓ (app backgrounded, not crashed).
+
+## T14 — Bilingual UI (el/en) (2026-08-20)
+- NEW `src/i18n/{index.js,el.js,en.js}`, rewritten `src/views/SettingsView.vue`, `src/main.js`;
+  `TabBar.vue` + the other two views now render every string through `t()`.
+- Hand-rolled, no library: a module-level `locale` ref (same discipline as `usePlayer`),
+  `t(key, params)` doing `{name}` substitution, and a **three-step fallback chain**
+  `active locale → en → the key itself`, so a missing Greek string shows the English word and a
+  typo'd key is visible in the UI instead of rendering blank.
+- Dictionaries are FLAT dotted keys (`'library.count.songs'`), not nested objects — a nested
+  lookup needs a path walker and gains nothing for ~55 keys. Keys for T15-T19 (permission,
+  empty, no-results, transport labels) are already written, so those tasks add markup only.
+- Locale resolution order: `detectLocale()` (`navigator.language.startsWith('el')`) seeds the ref
+  SYNCHRONOUSLY so the first paint is already right, then `initLocale()` overrides it from
+  `@capacitor/preferences` key `kefi.locale`. `main.js` mounts inside
+  `initLocale().finally(...)` — `.finally`, not `.then`, so a storage failure still mounts the app.
+- `setLocale` switches the ref BEFORE awaiting the write: the tap must repaint even if
+  persistence fails, and everything user-facing is derived from the ref.
+- QA: `grep -rnE '>[A-Za-zΑ-Ωα-ω][^<{]{3,}<' src/views src/components | grep -v "t("` → no matches
+  (exit 1) ✓. Real tap on `Ελληνικά` in Settings flipped the tab labels to
+  `["Βιβλιοθήκη","Ρυθμίσεις"]` with `performance.getEntriesByType('navigation').length` still `1`
+  and the live CDP session unbroken — proof it re-rendered rather than reloaded ✓.
+  `am force-stop` + relaunch came back up with the Greek labels ✓ (`/tmp/kefi-settings-el.png`).
