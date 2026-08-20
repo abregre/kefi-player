@@ -550,9 +550,9 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
 
 ## Final Verification Wave
 
-- [ ] **F1: Build integrity** — `npm run build` succeeds; `npm run apk` prints
+- [x] **F1: Build integrity** — `npm run build` succeeds; `npm run apk` prints
   `BUILD SUCCESSFUL`; `cd android && JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto ANDROID_HOME=/home/nonos/Android/Sdk ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'` prints `0`.
-- [ ] **F2: Release integrity** — `npm run apk:release` prints `BUILD SUCCESSFUL`. No
+- [x] **F2: Release integrity** — `npm run apk:release` prints `BUILD SUCCESSFUL`. No
   `android/keystore.properties` exists in this project today, so `hasKeystore` is false in
   `android/app/build.gradle` and the expected artifact is
   `android/app/build/outputs/apk/release/app-release-unsigned.apk` — assert that file exists.
@@ -560,20 +560,25 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
   which case `~/Android/Sdk/build-tools/36.0.0/apksigner verify --print-certs -v <apk>` must
   report `Verified using v2 scheme (APK Signature Scheme v2): true`. Do **not** create a
   keystore as part of this plan — it is a one-time user decision with a password.
-- [ ] **F3: Scripted QA suite** — `npm run qa` exits `0`; every T-task QA scenario re-run
+- [x] **F3: Scripted QA suite** — `npm run qa` exits `0`; every T-task QA scenario re-run
   green on a fresh install (`$EMU install -r`), fixtures re-created by `scripts/qa-fixtures.sh`.
-- [ ] **F4: Scope review of the complete diff** — `git diff --stat` reviewed against Must Have
+- [x] **F4: Scope review of the complete diff** — `git diff --stat` reviewed against Must Have
   and Must NOT Have;
   `grep -rniE "room|sqlite|pinia|equalizer|audiofx|crossfade|sleeptimer|MediaLibraryService" src/ android/app/src/main/java/ package.json`
   returns no matches; `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" | wc -l` prints `0`;
   `grep -c "media3-ui\|media3-datasource\|decoder-ffmpeg\|exoplayer-av1" android/app/build.gradle` prints `0`;
   `git status --porcelain` is empty (everything committed).
-- [ ] **F5: Hands-on QA — BLOCKED-UNTIL-DEVICE.** The four items proven unscriptable:
+- [ ] **F5: Hands-on QA — NOT RUN (BLOCKED-UNTIL-DEVICE, 2026-08-20).** No physical
+  Android device has been connected at any point (`adb devices` lists only
+  `emulator-5554`), so this wave was **not executed** and is reported as not run — never
+  as passed. Everything it covers is unscriptable by construction; see the QA section of
+  `README.md`. Original text follows.
+- [ ] **F5 (original):** The four items proven unscriptable:
   audibility; real Bluetooth A2DP/AVRCP routing plus play/pause/next from the headset;
   lock-screen control appearance; wired-headset unplug pausing rather than blasting the
   speaker. Run `adb -s <serial> shell dumpsys media_session | grep state=` before and after
   each. If no device is connected, F5 is reported as **not run**, never as passed.
-- [ ] **F6: Documentation** — `README.md` gains a "What the app does" section, the
+- [x] **F6: Documentation** — `README.md` gains a "What the app does" section, the
   `npm run qa` / `npm run fixtures` commands, the permission model, and the roadmap
   (playlists+favourites on Room, sleep timer + playback speed, widget) so the next plan starts
   from a written baseline.

@@ -1343,3 +1343,36 @@ smooth bar with zero extra IPC.
      assertions after it then all passed against a renderer that never died — a false green.
      Now uses `shell su 0 kill -9` and FAILS LOUDLY, naming `adb root`, when it cannot kill.
 - Result on `emulator-5554` (API 36): **29/29 PASS**.
+
+## Final Verification Wave (2026-08-20)
+- **F1 build integrity ✓** — `npm run build` ✓; `npm run apk` → exactly one `BUILD SUCCESSFUL`;
+  `:app:compileDebugKotlin` → `0` lines matching `^e:`. Re-run after the last source edit.
+- **F2 release integrity ✓** — `npm run apk:release` → `BUILD SUCCESSFUL` (2m36s, 190 tasks);
+  `android/app/build/outputs/apk/release/app-release-unsigned.apk` exists (6.0 MB). No
+  `android/keystore.properties` in the project, so the unsigned path is the expected one and
+  **no keystore was created** — that stays the user's one-time decision.
+- **F3 scripted QA ✓** — on a FRESH install (`pm clear` + `install -r`) with fixtures re-created
+  by `npm run fixtures`: `npm run qa` → **exit 0, 29/29 PASS**. The Phase B UI scenarios
+  (T13-T19) were re-run as a separate scratchpad sweep: **30/30 PASS**, including the Greek
+  collation order, `ωδη` → 1 row, 3 albums / 2 artists, the mini-player surviving two
+  navigations with a monotonically rising bar, seek landing 12ms off the midpoint, restored
+  shuffle/repeat/paused rendering, and the revoke → ask → grant-with-no-restart path. T11's
+  scenario was also re-run by hand: deleting `f1.mp3` mid-queue emitted
+  `trackUnavailable {reason: file_not_found}`, playback moved to `Zeibekiko`, and the shell
+  showed the Greek skip notice; fixtures restored afterwards.
+- **F4 scope review ✓** — the diff since `6546cbc` is 28 files, +3146/-295, and every path is
+  one the plan named. Forbidden-identifier grep returns **0** (two hits were English prose in
+  comments — "no room for one" and a comment listing what was *rejected*; both reworded so the
+  check is literally green rather than green-with-an-excuse). `*.ts` outside node_modules/android
+  → `0`. `media3-ui|media3-datasource|decoder-ffmpeg|exoplayer-av1` in `app/build.gradle` → `0`.
+  `abiFilters|useLegacyPackaging` → `0`. Nothing under `/mnt/X/myProjects/ytmp3` modified
+  (`find -newermt 2026-08-20` → 0 files).
+- **F5 hands-on QA — NOT RUN.** No physical device has been connected at any point; `adb devices`
+  lists only `emulator-5554`. Audibility, real Bluetooth A2DP/AVRCP, lock-screen visuals and
+  wired-headset unplug remain unverified. Reported as not run, never as passed. The plan's F5
+  checkbox is deliberately left unticked.
+- **F6 documentation ✓** — `README.md` gained "What the app does", the permission model with the
+  three Library states, a QA section (`npm run fixtures` / `npm run qa`, what the suite covers,
+  what stays manual and why), and the roadmap (playlists+favourites on Room → sleep timer +
+  playback speed → widget; equalizer declined). Stale text fixed: the playback engine is no
+  longer "will be native", and the "no `.kt` file exists yet" note now lists the six Kotlin files.

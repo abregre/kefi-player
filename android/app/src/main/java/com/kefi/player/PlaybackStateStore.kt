@@ -17,7 +17,7 @@ import org.json.JSONArray
  * prefix — mirrors the single-prefs-file convention of
  * `com.ytmp3.app.StorageLocation` (`/mnt/X/myProjects/ytmp3/android/app/src/main/java/com/ytmp3/app/StorageLocation.kt:40-83`:
  * `context.getSharedPreferences(<one file>, MODE_PRIVATE)`). Backed by `org.json.JSONArray`
- * only — no Room/DataStore/`@capacitor/preferences`/SQLite, an explicit plan-level
+ * only — no ORM, no key-value library, no embedded database: an explicit plan-level
  * Must NOT Have.
  */
 object PlaybackStateStore {

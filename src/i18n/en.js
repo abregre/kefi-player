@@ -1,6 +1,6 @@
 /**
  * English UI strings. Flat dotted keys, one file per locale — no i18n library
- * (Must NOT Have has no room for one, and two locales do not justify a dependency).
+ * (Must NOT Have rules one out, and two locales would not justify a dependency).
  * `{name}` placeholders are substituted by `t(key, params)`.
  */
 export default {
