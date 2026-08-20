@@ -50,6 +50,19 @@
   --danger-soft: #1e080a; /* --danger on it is 4.7:1 */
 
   /*
+   * Progress fill, defined once and used by every progress surface (the mini-player's
+   * strip and the Now Playing seek bar) so they cannot drift apart. It resolves per
+   * theme on its own: the tokens inside are substituted where the gradient is USED,
+   * not here, so the light theme's deeper green and yellow come through automatically.
+   */
+  --progress-gradient: linear-gradient(
+    90deg,
+    var(--accent),
+    var(--accent-strong) 55%,
+    var(--accent-deep)
+  );
+
+  /*
    * Safe-area insets, so screens can pad without repeating env() everywhere.
    *
    * `--safe-area-inset-*` comes FIRST because it is the only source that is correct on

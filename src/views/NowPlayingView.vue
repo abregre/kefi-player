@@ -40,6 +40,16 @@ const dragging = ref(false)
 const dragValue = ref(0)
 
 const sliderValue = computed(() => (dragging.value ? dragValue.value : player.displayPosition.value))
+/**
+ * How much of the seek track is behind the thumb, as a percentage. Fed to the track as a
+ * custom property because a range input's fill is not a thing CSS gives you: the track
+ * pseudo-element paints the gradient clipped to this width.
+ */
+const seekFill = computed(() => {
+  const total = player.duration.value
+  if (!total) return 0
+  return Math.min(100, (sliderValue.value / total) * 100)
+})
 const elapsedLabel = computed(() => formatMs(sliderValue.value))
 const remainingLabel = computed(() =>
   player.duration.value ? `-${formatMs(player.duration.value - sliderValue.value)}` : '--:--',
@@ -105,6 +115,7 @@ function cycleRepeat() {
           :max="player.duration.value || 0"
           step="1000"
           :value="sliderValue"
+          :style="{ '--seek-fill': `${seekFill}%` }"
           :aria-label="t('player.seek')"
           @input="onSeekInput"
           @change="onSeekCommit"
@@ -347,7 +358,19 @@ function cycleRepeat() {
 .seek-input::-webkit-slider-runnable-track {
   height: 0.28rem;
   border-radius: 999px;
-  background: var(--surface-2);
+  /*
+   * Two layers: the shared progress gradient, sized to the elapsed fraction and not
+   * repeated, over the empty-track colour. `--seek-fill` is set on the input itself and
+   * inherits in here — a range input gives no ::fill pseudo-element in Chromium, so the
+   * track has to paint its own.
+   *
+   * Sized rather than clipped, exactly like the mini-player's strip: the whole
+   * green -> yellow -> red sweep is squeezed into however much has played, so both
+   * progress surfaces read as the same object at any position.
+   */
+  background:
+    var(--progress-gradient) 0 0 / var(--seek-fill, 0%) 100% no-repeat,
+    var(--surface-2);
 }
 
 .seek-input::-webkit-slider-thumb {

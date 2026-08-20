@@ -115,8 +115,8 @@ function toggle() {
 .progress-fill {
   height: 100%;
   /* Green -> yellow -> red, the icon's own sweep, so the strip reads as this app's
-     rather than as a generic progress bar. */
-  background: linear-gradient(90deg, var(--accent), var(--accent-strong) 55%, var(--accent-deep));
+     rather than as a generic progress bar. Shared with the Now Playing seek bar. */
+  background: var(--progress-gradient);
 }
 
 .body {

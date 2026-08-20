@@ -1459,3 +1459,22 @@ rather than one flat set of six colours.
   the status/navigation bar icon appearance on the configuration change (the manifest keeps
   `uiMode` in `configChanges`, so the Activity is not recreated). Sampled pixels confirm dark
   icons on the light strip and light icons on the dark one. `npm run qa` 35/35.
+
+## Progress surfaces share one gradient (2026-08-20)
+The mini-player strip's green → yellow → red fill is now `--progress-gradient` in
+`src/style.css` — one definition, used by both the strip and the Now Playing seek bar, so
+they cannot drift. It resolves per theme for free: the tokens inside a custom property are
+substituted where the gradient is USED, not where it is declared, so light mode's deeper
+green/yellow come through automatically (verified by pixel-sampling both themes).
+- **A range input has no fill pseudo-element in Chromium**, so the seek bar's track paints
+  its own: `background: var(--progress-gradient) 0 0 / var(--seek-fill, 0%) 100% no-repeat,
+  var(--surface-2)`, with `--seek-fill` set inline on the input (custom properties inherit
+  into `::-webkit-slider-runnable-track`).
+- SIZED, not clipped, deliberately — the whole sweep squeezes into however much has played,
+  which is exactly what the mini-player's `width: N%` fill already did. Both surfaces
+  therefore look like the same object at any position.
+- **Do not try to verify this with `getComputedStyle(el, '::-webkit-slider-runnable-track')`.**
+  Chromium returns the element's own style for non-standard pseudos, so it reported
+  `background-image: none` for a track that was painting correctly. Verified by sampling the
+  screenshot's pixels along the track instead: at 50% the filled half reads green
+  (21,115,55) → yellow (228,202,6) → red (246,58,38) and the rest is the empty-track colour.
