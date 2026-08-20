@@ -46,6 +46,20 @@ object TrackSource {
          * additive to the T9 contract, so nothing that ignores it breaks.
          */
         val folder: String,
+        /**
+         * The file name on disk, with extension (`Zeibekiko.mp3`). Unlike [title], which comes
+         * from tags and can be edited or missing, this is stable — `folder + "/" + displayName`
+         * is the identity the playlists and favourites features key off, additive here too.
+         */
+        val displayName: String,
+        /**
+         * Epoch seconds MediaStore indexed this file at — NOT when the user acquired it, and
+         * NOT milliseconds. A bulk scan (a fresh install, a folder copied in one go) timestamps
+         * every row in the same second, so this ties often; the Recently added UI sorts by it
+         * anyway because it is the only chronological signal MediaStore offers without SAF.
+         * `0` means the column came back NULL (seen on some OEM providers) and sorts last.
+         */
+        val dateAdded: Long,
     )
 
     /** In-memory only, at most 64 entries — an explicit Must NOT Have forbids anything durable. */
@@ -108,11 +122,11 @@ object TrackSource {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.ALBUM_ARTIST,
-            MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.DATE_ADDED,
             folderColumn(),
         )
         // `IS_MUSIC = 1` is necessary but nowhere near sufficient. Android's media scanner
@@ -154,6 +168,7 @@ object TrackSource {
                 val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
                 val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val folderCol = cursor.getColumnIndexOrThrow(folderColumn())
 
                 while (cursor.moveToNext()) {
@@ -175,6 +190,8 @@ object TrackSource {
                             durationMs = cursor.getLong(durationCol),
                             size = cursor.getLong(sizeCol),
                             folder = folderOf(cursor.getString(folderCol)),
+                            displayName = displayName ?: "",
+                            dateAdded = if (cursor.isNull(dateAddedCol)) 0L else cursor.getLong(dateAddedCol),
                         )
                     )
                 }

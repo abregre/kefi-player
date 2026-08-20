@@ -114,4 +114,13 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+
+    <!--
+        For setting a track as ringtone/notification tone. This is a "special" permission —
+        Android has no runtime dialog for it at all, so requesting it through Capacitor's
+        normal permission APIs would silently do nothing. It can only be granted by the user
+        toggling it on in system Settings (Settings.System.canWrite / ACTION_MANAGE_WRITE_SETTINGS),
+        which is why PlayerPlugin.setAsRingtone checks canWrite() before every call instead.
+    -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 </manifest>

@@ -1,5 +1,36 @@
+<script>
+import { ref } from 'vue'
+
+/**
+ * Module scope, NOT inside the `<script setup>` block below — fixing a real, pre-existing
+ * bug. This comment used to claim expansion survives a trip to Now Playing and back, but the
+ * OLD declaration lived inside `<script setup>`, whose top-level code re-runs for every fresh
+ * COMPONENT INSTANCE. `LibraryView`'s route has no `<keep-alive>` (confirmed in T8's notes),
+ * so navigating away and back destroys this component and mounts a new one — which silently
+ * re-ran `ref([])` and threw away whatever was open. A plain, non-setup `<script>` block's top
+ * level runs exactly once, the first time this module is imported (same reasoning as
+ * `usePlayer.js:8-32`'s module-level refs), so this one array is shared by every mount for the
+ * app's whole lifetime — which is what the old comment always described, and now actually
+ * does. Behaviour change worth flagging: a folder that used to collapse when you left the
+ * Library now stays open.
+ * @type {import('vue').Ref<string[]>}
+ */
+export const expanded = ref([])
+
+/**
+ * Lets another view open a folder without a prop drill, a router query param, or an event
+ * bus — `expanded` being module-level (above) is already the established pattern for exactly
+ * this, so callers (LibraryView's "view in folder", and cross-screen, a track menu opened
+ * from `/playlist/:id`) push into it through here instead of reaching into the ref directly.
+ * @param {string} key
+ */
+export function expandFolder(key) {
+  if (!expanded.value.includes(key)) expanded.value = [...expanded.value, key]
+}
+</script>
+
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from '../i18n'
 import TrackRow from './TrackRow.vue'
 
@@ -11,16 +42,9 @@ const props = defineProps({
   playing: { type: Boolean, default: false },
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'options'])
 
 const { t } = useI18n()
-
-/**
- * Module level, like the Library's own tab: expanding a folder, going to Now Playing and
- * coming back should not silently collapse everything the user opened.
- * @type {import('vue').Ref<string[]>}
- */
-const expanded = ref([])
 
 /** @param {string} key */
 function toggle(key) {
@@ -56,6 +80,7 @@ const rows = computed(() =>
         class="row folder-row"
         :class="{ open: expanded.includes(folder.key) }"
         :aria-expanded="expanded.includes(folder.key)"
+        :data-folder-key="folder.key"
         @click="toggle(folder.key)"
       >
         <span class="icon" aria-hidden="true">
@@ -93,6 +118,7 @@ const rows = computed(() =>
             :active="props.currentUri === track.uri"
             :playing="props.playing && props.currentUri === track.uri"
             @select="$emit('select', { track, tracks: folder.tracks })"
+            @options="$emit('options', track)"
           />
         </li>
       </ul>

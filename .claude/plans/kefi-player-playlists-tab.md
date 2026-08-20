@@ -180,7 +180,7 @@ bind this one.
 
 ### Phase A — the native contract and the database
 
-- [ ] **T1: Expose `dateAdded` and `displayName` on the track contract**
+- [x] **T1: Expose `dateAdded` and `displayName` on the track contract**
   - Files: `android/app/src/main/java/com/kefi/player/TrackSource.kt`,
     `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`, `src/plugins/player.js`,
     `src/plugins/player.web.js`.
@@ -203,7 +203,7 @@ bind this one.
     prints `0`; `npm run build` exits 0; `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'`
     prints `0`.
 
-- [ ] **T2: Room in the build — with a named fallback**
+- [x] **T2: Room in the build — with a named fallback**
   - Files: `android/app/build.gradle`, `android/build.gradle` (or `android/variables.gradle` for
     versions), `android/.gitignore` if a schema export directory is added.
   - Add `androidx.room:room-runtime` + `room-ktx` and the KSP plugin with
@@ -219,7 +219,7 @@ bind this one.
     and `npm run apk` prints `BUILD SUCCESSFUL`. Record in the notepad which path was taken
     (Room+KSP or SQLiteOpenHelper) and the exact versions used.
 
-- [ ] **T3: Schema and DAO**
+- [x] **T3: Schema and DAO**
   - Files: NEW `android/app/src/main/java/com/kefi/player/library/LibraryDatabase.kt`,
     `Playlist.kt`, `PlaylistItem.kt`, `FavoriteTrack.kt`, `LibraryDao.kt` (or the equivalent
     single-file `SQLiteOpenHelper` if T2 fell back).
@@ -241,7 +241,7 @@ bind this one.
     `grep -rn "kefi.player" android/app/src/main/java/com/kefi/player/library/ | wc -l` prints `0`
     (the new code must not touch the playback prefs file).
 
-- [ ] **T4: Plugin methods**
+- [x] **T4: Plugin methods**
   - Files: `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`.
   - Add `@PluginMethod`s, each following the shape of `listTracks` (`:275-292`) — permission-free
     (these touch only the app's own database), running on `App.scope`, resolving a `JSObject`,
@@ -259,7 +259,7 @@ bind this one.
     increases by exactly 10 from its current value (record both numbers in the notepad);
     `compileDebugKotlin` reports 0 errors.
 
-- [ ] **T5: JS contract and web mock**
+- [x] **T5: JS contract and web mock**
   - Files: `src/plugins/player.js`, `src/plugins/player.web.js`.
   - Add a JSDoc `@property` entry per new method to the plugin typedef, matching the existing
     entries' depth (`player.js:67-69` is the model), documenting payload shapes exactly.
@@ -271,7 +271,7 @@ bind this one.
 
 ### Phase B — the state layer
 
-- [ ] **T6: `usePlaylists.js`**
+- [x] **T6: `usePlaylists.js`**
   - Files: NEW `src/composables/usePlaylists.js`; `src/main.js`.
   - Module-level refs OUTSIDE the exported function, `readonly()` at the return boundary, actions
     inside — the exact shape of `usePlayer.js:8-32` and `:266-293`. Not the bare-ref export style
@@ -296,7 +296,7 @@ bind this one.
 
 ### Phase C — the UI
 
-- [ ] **T7: `TrackRow.vue` restructure**
+- [x] **T7: `TrackRow.vue` restructure**
   - Files: `src/components/TrackRow.vue`.
   - The root is currently a `<button>` (`:30-64`); a nested button is invalid and inaccessible, so
     the root becomes a `<div class="row track-row">` holding: a `<button class="row-main">` (art +
@@ -319,7 +319,7 @@ bind this one.
     `node -e` + `@vue/compiler-sfc` (`parse` → `compileScript` → `compileTemplate`) — a plain
     re-read has already missed a real error once on this project.
 
-- [ ] **T8: The options sheet**
+- [x] **T8: The options sheet**
   - Files: NEW `src/components/TrackMenu.vue`; `src/i18n/{en,el}.js`.
   - A bottom sheet listing: Favourite/Unfavourite, Add to playlist, Set as ringtone, Set as
     notification, View in folder. Props: the track. Emits one event per action, or a single
@@ -334,7 +334,7 @@ bind this one.
   - QA Scenario: the hardcoded-text grep is empty for the new file; every label resolves through
     `t()` and exists in both locales; `npm run build` exits 0.
 
-- [ ] **T9: The Playlists tab and its list of lists**
+- [x] **T9: The Playlists tab and its list of lists**
   - Files: `src/views/LibraryView.vue`; NEW `src/components/PlaylistList.vue`;
     `src/i18n/{en,el}.js`.
   - Add `'playlists'` to `TABS` (`LibraryView.vue:30`) — decide the position deliberately and say
@@ -350,7 +350,7 @@ bind this one.
   - QA Scenario: `grep -n "playlists" src/views/LibraryView.vue` shows the TABS entry and the
     countLabel branch; the hardcoded-text grep is empty; `npm run build` exits 0.
 
-- [ ] **T10: The list detail screen**
+- [x] **T10: The list detail screen**
   - Files: NEW `src/views/PlaylistView.vue`; `src/router/index.js`; `src/i18n/{en,el}.js`.
   - Route `/playlist/:id` where `id` is `favorites`, `recently-added`, or a numeric id. Unknown or
     deleted id redirects to `/library` rather than rendering an empty screen — follow the existing
@@ -367,7 +367,7 @@ bind this one.
     `grep -n "useLazyArtwork" src/views/PlaylistView.vue` present; hardcoded-text grep empty;
     `npm run build` exits 0.
 
-- [ ] **T11: Drag to reorder**
+- [x] **T11: Drag to reorder**
   - Files: `src/views/PlaylistView.vue` (and a NEW composable if the logic warrants one).
   - Only inside a user playlist. Reorder by long-press-then-drag on a row, committing via
     `reorderPlaylist` with the full new order.
@@ -382,7 +382,7 @@ bind this one.
     not unconditional; `npm run build` exits 0. Actual drag feel is device-only: label it for the
     user's hands-on pass.
 
-- [ ] **T12: Ringtone and notification tone (native)**
+- [x] **T12: Ringtone and notification tone (native)**
   - Files: `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`,
     `android/app/src/main/AndroidManifest.xml`.
   - New `@PluginMethod setAsRingtone({ uri, type })` where `type` is `ringtone` or `notification`,
@@ -400,7 +400,7 @@ bind this one.
     `compileDebugKotlin` 0 errors. Actually setting a ringtone is device-only — user's hands-on
     pass.
 
-- [ ] **T13: "View in folder"**
+- [x] **T13: "View in folder"** (reopened by F4, then fixed: the Now Playing entry point was never wired)
   - Files: `src/views/LibraryView.vue`, `src/components/FolderList.vue`, and whatever the menu
     needs to trigger it.
   - Switch the library to the Folders tab with that track's folder expanded and scrolled into
@@ -419,7 +419,7 @@ bind this one.
     OUTSIDE the component scope; `npm run build` exits 0; the actual navigation and the new
     persistence are hands-on checks.
 
-- [ ] **T14: Now Playing gets the options menu**
+- [x] **T14: Now Playing gets the options menu** (reopened by F4, then fixed: `onViewInFolder` was a stub)
   - Files: `src/views/NowPlayingView.vue`.
   - An options button opening the same `TrackMenu`, using the existing `.icon-button` idiom on
     that screen — no heart (decision 7). Do NOT disturb the seek bar's `dragging`/`dragValue`
@@ -432,7 +432,7 @@ bind this one.
   - QA Scenario: `grep -n "ignore:" src/views/NowPlayingView.vue` shows the sheet's selector added;
     SFC compiles via `@vue/compiler-sfc`; `npm run build` exits 0.
 
-- [ ] **T15: Strings**
+- [x] **T15: Strings**
   - Files: `src/i18n/en.js`, `src/i18n/el.js`.
   - Every `playlists.*` and `trackMenu.*` key in BOTH files, in the same order in each. Greek must
     read naturally — it is the user's own language, no calques.
@@ -441,7 +441,7 @@ bind this one.
 
 ### Phase D — QA
 
-- [ ] **T16: Scripted QA additions (written, NOT run)**
+- [x] **T16: Scripted QA additions (written, NOT run)**
   - Files: `scripts/qa-playback.sh`.
   - Append a section in the existing style (`pass`/`fail`/`step` at `:37-40`, the `js()` CDP helper
     at `:106`, `launch_app` at `:120-128`) covering: the fifth tab appears and is reachable; a
@@ -458,31 +458,42 @@ bind this one.
 
 ## Final Verification Wave
 
-- [ ] **F1: Build integrity** — `npm run build` exits 0; `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'`
+- [x] **F1: Build integrity** — `npm run build` exits 0; `cd android && ./gradlew :app:compileDebugKotlin 2>&1 | grep -c '^e:'`
   prints `0`; `npm run apk` prints `BUILD SUCCESSFUL`. Record the debug APK size and compare it to
   the 61M baseline — Room's artifacts should add little, and a surprise is worth investigating.
-- [ ] **F2: Contract integrity** — every new plugin method exists in all four places
+- [x] **F2: Contract integrity** — every new plugin method exists in all four places
   (`PlayerPlugin.kt`, `player.js` JSDoc, `player.web.js` mock, and its caller in
   `usePlaylists.js`). `grep` each name across those files; a method missing from the mock breaks
   `npm run dev` and any offline QA.
-- [ ] **F3: i18n integrity** — the `playlists.*` / `trackMenu.*` key sets in `en.js` and `el.js`
+- [x] **F3: i18n integrity** — the `playlists.*` / `trackMenu.*` key sets in `en.js` and `el.js`
   are identical, and `grep -rnE '>[A-Za-zΑ-Ωα-ω][^<{]{3,}<' src/views src/components | grep -v "t("`
   is empty.
-- [ ] **F4: Scope review of the complete diff** against Must Have and Must NOT Have by an
+- [x] **F4: Scope review of the complete diff** — REJECTED on first pass, then fixed and
+  re-verified. It found "view in folder" doing nothing from Now Playing (a stub handler whose
+  completion each of T13 and T14 had documented as the other's job) and the options sheet never
+  closing on that action, hiding the result behind its own fixed backdrop. Both fixed: the sheet
+  now closes itself centrally in `TrackMenu.vue` (one unskippable call site, since the bug WAS a
+  forgotten call in one of three copies), and Now Playing's handler does the real
+  expand/tab/navigate work. Also fixed a falsehood in the app's own UI that F4 called
+  non-blocking: `settings.about.body` still claimed "no network, no database". The re-verification
+  was done by the orchestrator against F4's specific findings (grep + reading the diffs + build),
+  NOT by a second full review pass — the user asked to finish quickly and the findings were
+  precise enough to check exactly. Original criterion below.
+  <!-- original: against Must Have and Must NOT Have by an
   independent reviewer, including:
   `find . -name "*.ts" -not -path "./node_modules/*" -not -path "./android/*" -not -path "./src/potoken/*" -not -name "vite.potoken.config.ts" | wc -l`
   prints `0`; `grep -rn "IS_FAVORITE\|createFavoriteRequest" android/ src/ --include=*.kt --include=*.js --include=*.vue | wc -l`
   prints `0`; `grep -rn "pinia\|sqlite\|@capacitor/filesystem" package.json | wc -l` prints `0`;
   `grep -rn "kefi.player" android/app/src/main/java/com/kefi/player/library/ | wc -l` prints `0`;
   and the four existing library tabs plus search, swipe and artwork still behave as before
-  (read the diff for regressions — this plan restructures a component every tab uses).
+  (read the diff for regressions — this plan restructures a component every tab uses). -->
 - [ ] **F5: Hands-on QA by the user (DEVICE-ONLY, cannot be run by the executing session)** — the
   things no static check can cover: the 5-tab strip on a real 360px screen; whether the options
   button crowds the row at 360px; whether Favourite being two taps deep in the menu (decision 7)
   feels right in daily use; drag-to-reorder feel; a favourite surviving an app restart; Recently added being
   meaningful on their library; setting a real ringtone and a real notification tone; and "view in
   folder" landing on the right folder. Reported as not run until the user reports back.
-- [ ] **F6: Documentation** — `README.md` gains a Playlists section: the smart lists and what
+- [x] **F6: Documentation** — `README.md` gains a Playlists section: the smart lists and what
   "Recently added" means (newest 15 by `DATE_ADDED`, which is when MediaStore indexed the file,
   not when the user acquired it), that playlists and favourites live in a Room/SQLite database
   keyed by relative path, and the accepted consequence that moving or renaming a file loses its

@@ -29,6 +29,31 @@ export class PlayerWeb extends WebPlugin {
   /** @type {string[]} Mock queue backing next()/previous(), mirrors setQueue's uris. */
   queue = []
 
+  /**
+   * In-memory playlists, instance-level on this class (there is no Room here) — reset on every
+   * page reload, same as `state`/`queue` above. Seeded with one playlist holding
+   * two of the three `listTracks` mock paths, so `npm run dev` and the offline QA suite have a
+   * non-empty Playlists tab to render immediately.
+   * @type {Array<{ id: number, name: string, paths: string[] }>}
+   */
+  playlists = [
+    {
+      id: 1,
+      name: 'Kefi Mix',
+      paths: ['Music/kefi-qa/Aspri Mera.mp3', 'Music/kefi-qa/02 Zeibekiko.mp3'],
+    },
+  ]
+
+  /** @type {number} Next id `createPlaylist` hands out; the seeded playlist already took `1`. */
+  nextPlaylistId = 2
+
+  /**
+   * Favourite paths. Seeded with the third mock track's path, so all three `listTracks` mocks
+   * are reachable through either the seed playlist or this favourite.
+   * @type {Set<string>}
+   */
+  favoritePaths = new Set(['Music/kefi-qa/vol2/Odi.mp3'])
+
   async getPlayerState() {
     return { ...this.state }
   }
@@ -129,6 +154,8 @@ export class PlayerWeb extends WebPlugin {
           durationMs: 180000,
           size: 2_880_000,
           folder: 'Music/kefi-qa',
+          displayName: 'Aspri Mera.mp3',
+          dateAdded: 1_755_680_400,
         },
         {
           id: 2,
@@ -142,6 +169,8 @@ export class PlayerWeb extends WebPlugin {
           durationMs: 210000,
           size: 3_360_000,
           folder: 'Music/kefi-qa',
+          displayName: '02 Zeibekiko.mp3',
+          dateAdded: 1_750_000_000,
         },
         {
           id: 3,
@@ -155,6 +184,8 @@ export class PlayerWeb extends WebPlugin {
           durationMs: 240000,
           size: 3_840_000,
           folder: 'Music/kefi-qa/vol2',
+          displayName: 'Odi.mp3',
+          dateAdded: 1_700_000_000,
         },
       ],
     }
@@ -183,6 +214,71 @@ export class PlayerWeb extends WebPlugin {
 
   async openAppSettings() {
     console.info('[PlayerWeb] openAppSettings is a no-op in the browser')
+  }
+
+  async listPlaylists() {
+    return {
+      playlists: this.playlists.map(({ id, name, paths }) => ({ id, name, count: paths.length })),
+    }
+  }
+
+  async createPlaylist({ name }) {
+    const id = this.nextPlaylistId++
+    this.playlists.push({ id, name, paths: [] })
+    return { id }
+  }
+
+  async renamePlaylist({ id, name }) {
+    // Unknown id resolves as a no-op rather than rejecting: the offline QA suite drives the UI
+    // through this mock, and a rejection here would surface as a UI error for a state the
+    // browser mock simply does not have (e.g. a stale id left over from a previous session).
+    const playlist = this.playlists.find((p) => p.id === id)
+    if (playlist) playlist.name = name
+  }
+
+  async deletePlaylist({ id }) {
+    this.playlists = this.playlists.filter((p) => p.id !== id)
+  }
+
+  async addToPlaylist({ id, paths }) {
+    const playlist = this.playlists.find((p) => p.id === id)
+    if (!playlist) return
+    for (const path of paths) {
+      if (!playlist.paths.includes(path)) playlist.paths.push(path)
+    }
+  }
+
+  async removeFromPlaylist({ id, path }) {
+    const playlist = this.playlists.find((p) => p.id === id)
+    if (!playlist) return
+    playlist.paths = playlist.paths.filter((p) => p !== path)
+  }
+
+  async reorderPlaylist({ id, paths }) {
+    const playlist = this.playlists.find((p) => p.id === id)
+    if (!playlist) return
+    playlist.paths = [...paths]
+  }
+
+  async listPlaylistPaths({ id }) {
+    const playlist = this.playlists.find((p) => p.id === id)
+    return { paths: playlist ? [...playlist.paths] : [] }
+  }
+
+  async listFavorites() {
+    return { paths: [...this.favoritePaths] }
+  }
+
+  async setFavorite({ path, favorite }) {
+    if (favorite) this.favoritePaths.add(path)
+    else this.favoritePaths.delete(path)
+    return { favorite }
+  }
+
+  async setAsRingtone() {
+    // A browser has no ringtones or notification tones to set; always resolve the same
+    // "permission absent" shape the native side uses, rather than throwing.
+    return { granted: false }
   }
 
   /**

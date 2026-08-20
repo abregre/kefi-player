@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -21,6 +22,9 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
+import com.kefi.player.library.FavoriteTrack
+import com.kefi.player.library.LibraryDatabase
+import com.kefi.player.library.Playlist
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -312,6 +316,206 @@ class PlayerPlugin : Plugin() {
         }
     }
 
+    // ---- Playlists and favourites ------------------------------------------------------
+    //
+    // Unlike listTracks/getArtwork above, none of the following ten methods touch MediaStore,
+    // so none of them check hasAudioPermission(): they only read and write this app's OWN Room
+    // database (LibraryDatabase, T3), which the app owns outright and needs no runtime
+    // permission for — the same reasoning setShareTargetEnabled/setAsRingtone apply to their
+    // own private state below.
+
+    @PluginMethod
+    fun listPlaylists(call: PluginCall) {
+        App.scope.launch {
+            try {
+                val playlists = libraryDao().listPlaylistsWithCounts()
+                val array = JSArray()
+                playlists.forEach { playlist ->
+                    array.put(
+                        JSObject()
+                            .put("id", playlist.id)
+                            .put("name", playlist.name)
+                            .put("count", playlist.count),
+                    )
+                }
+                call.resolve(JSObject().put("playlists", array))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not list playlists: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun createPlaylist(call: PluginCall) {
+        val name = call.getString("name")
+        if (name.isNullOrBlank()) {
+            call.reject("A non-blank name is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                // createdAt is a real timestamp, not a placeholder zero: listPlaylistsWithCounts
+                // orders by it, and a zero here would make that ordering arbitrary.
+                val id = libraryDao().insertPlaylist(
+                    Playlist(name = name, createdAt = System.currentTimeMillis()),
+                )
+                call.resolve(JSObject().put("id", id))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not create playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun renamePlaylist(call: PluginCall) {
+        val id = call.requiredId() ?: return
+        val name = call.getString("name")
+        if (name.isNullOrBlank()) {
+            call.reject("A non-blank name is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                libraryDao().renamePlaylist(id, name)
+                call.resolve()
+            } catch (t: Throwable) {
+                call.rejectWith("Could not rename playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun deletePlaylist(call: PluginCall) {
+        val id = call.requiredId() ?: return
+
+        App.scope.launch {
+            try {
+                libraryDao().deletePlaylist(id)
+                call.resolve()
+            } catch (t: Throwable) {
+                call.rejectWith("Could not delete playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun addToPlaylist(call: PluginCall) {
+        val id = call.requiredId() ?: return
+        val paths = call.requiredPaths() ?: return
+
+        App.scope.launch {
+            try {
+                // appendToPlaylist (LibraryDao) already owns "no duplicate path per playlist" —
+                // idempotent per path, enforced by a UNIQUE index. No second dedupe layer here.
+                libraryDao().appendToPlaylist(id, paths)
+                call.resolve()
+            } catch (t: Throwable) {
+                call.rejectWith("Could not add to playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun removeFromPlaylist(call: PluginCall) {
+        val id = call.requiredId() ?: return
+        val path = call.getString("path")
+        if (path.isNullOrBlank()) {
+            call.reject("A non-blank path is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                libraryDao().deleteItem(id, path)
+                call.resolve()
+            } catch (t: Throwable) {
+                call.rejectWith("Could not remove from playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
+     * Takes the FULL ordered list of paths, not a from/to index pair. Mirrors
+     * [com.kefi.player.library.LibraryDao.reorderPlaylist]'s own choice: a complete rewrite in
+     * one transaction leaves no index arithmetic to get wrong on either side of the bridge, and
+     * there is no intermediate state a dropped call could leave half-applied.
+     */
+    @PluginMethod
+    fun reorderPlaylist(call: PluginCall) {
+        val id = call.requiredId() ?: return
+        val paths = call.requiredPaths() ?: return
+
+        App.scope.launch {
+            try {
+                libraryDao().reorderPlaylist(id, paths)
+                call.resolve()
+            } catch (t: Throwable) {
+                call.rejectWith("Could not reorder playlist: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun listPlaylistPaths(call: PluginCall) {
+        val id = call.requiredId() ?: return
+
+        App.scope.launch {
+            try {
+                val paths = libraryDao().listPlaylistPaths(id)
+                val array = JSArray()
+                paths.forEach { array.put(it) }
+                call.resolve(JSObject().put("paths", array))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not list playlist paths: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun listFavorites(call: PluginCall) {
+        App.scope.launch {
+            try {
+                val paths = libraryDao().listFavoritePaths()
+                val array = JSArray()
+                paths.forEach { array.put(it) }
+                call.resolve(JSObject().put("paths", array))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not list favorites: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun setFavorite(call: PluginCall) {
+        val path = call.getString("path")
+        if (path.isNullOrBlank()) {
+            call.reject("A non-blank path is required")
+            return
+        }
+        val favorite = call.getBoolean("favorite")
+        if (favorite == null) {
+            call.reject("A favorite boolean is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                if (favorite) {
+                    libraryDao().insertFavorite(
+                        FavoriteTrack(path = path, addedAt = System.currentTimeMillis()),
+                    )
+                } else {
+                    libraryDao().deleteFavorite(path)
+                }
+                call.resolve(JSObject().put("favorite", favorite))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not set favorite: ${t.message}", t)
+            }
+        }
+    }
+
     @PluginMethod
     fun checkAudioPermission(call: PluginCall) {
         call.resolve(audioPermissionResult())
@@ -377,6 +581,50 @@ class PlayerPlugin : Plugin() {
         call.resolve()
     }
 
+    /**
+     * `WRITE_SETTINGS` is a special permission: unlike `audio` above, Android never shows a
+     * grant dialog for it — the only way to get it is a manual toggle the user flips inside
+     * system Settings — so this checks [Settings.System.canWrite] up front instead of calling
+     * `requestPermissionForAlias`. When it is not yet granted this resolves `{ granted: false }`
+     * rather than rejecting: "not granted yet" is a state the UI must be able to explain to the
+     * user, not a plugin failure, and the call still opens `ACTION_MANAGE_WRITE_SETTINGS` so the
+     * user lands on the exact toggle that is blocking it.
+     */
+    @PluginMethod
+    fun setAsRingtone(call: PluginCall) {
+        val uriString = call.getString("uri")
+        if (uriString.isNullOrBlank()) {
+            call.reject("A uri is required")
+            return
+        }
+        val ringtoneType = when (call.getString("type")) {
+            "ringtone" -> RingtoneManager.TYPE_RINGTONE
+            "notification" -> RingtoneManager.TYPE_NOTIFICATION
+            else -> null
+        }
+        if (ringtoneType == null) {
+            call.reject("A type of ringtone|notification is required")
+            return
+        }
+
+        if (!Settings.System.canWrite(context)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:${context.packageName}"),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            call.resolve(JSObject().put("granted", false))
+            return
+        }
+
+        try {
+            RingtoneManager.setActualDefaultRingtoneUri(context, ringtoneType, Uri.parse(uriString))
+            call.resolve(JSObject().put("granted", true))
+        } catch (t: Throwable) {
+            call.rejectWith("Could not set ringtone: ${t.message}", t)
+        }
+    }
+
     companion object {
         fun setShareTargetEnabled(context: Context, enabled: Boolean) {
             val comp = ComponentName(context, "${context.packageName}.ShareTarget")
@@ -436,6 +684,46 @@ class PlayerPlugin : Plugin() {
         reject(message, cause as? Exception ?: Exception(cause))
     }
 
+    /** The one shared handle onto T3's database, opened lazily on first use (see its KDoc). */
+    private fun libraryDao() = LibraryDatabase.getInstance(context).libraryDao()
+
+    /**
+     * An id crosses the bridge from JS as a plain `number`. Same org.json boxing quirk as
+     * `seek`'s positionMs and `getArtwork`'s trackId above: small values are boxed as Integer,
+     * so `getLong` alone silently returns null for every realistic id. Rejects and returns null
+     * when absent, so every caller can `?: return`.
+     */
+    private fun PluginCall.requiredId(): Long? {
+        val id = getLong("id") ?: getInt("id")?.toLong()
+        if (id == null) {
+            reject("An id is required")
+        }
+        return id
+    }
+
+    /**
+     * Reads `paths` as a JSArray and rejects if the key itself is missing. Individual elements
+     * are converted defensively — see [JSArray.toStringList] — so one malformed entry from JS
+     * cannot crash the whole call; it is just dropped.
+     */
+    private fun PluginCall.requiredPaths(): List<String>? {
+        val array = getArray("paths")
+        if (array == null) {
+            reject("A paths array is required")
+            return null
+        }
+        return array.toStringList()
+    }
+
+    /**
+     * Drops any element that is not actually a String (e.g. a stray number or object), rather
+     * than letting a malformed JS payload throw partway through a native database write.
+     * Follows `setQueue`'s precedent for reading a JSArray of strings (~:185-213), made
+     * defensive here because these writes are persisted, unlike that read-only uri list.
+     */
+    private fun JSArray.toStringList(): List<String> =
+        (0 until length()).mapNotNull { get(it) as? String }
+
     /**
      * Serialises straight to the field names T6 documented as this task's public contract
      * (`.claude/notepads/kefi-player-full-android-player/learnings.md`, `## T6`). Used for
@@ -476,5 +764,7 @@ class PlayerPlugin : Plugin() {
         put("durationMs", durationMs)
         put("size", size)
         put("folder", folder)
+        put("displayName", displayName)
+        put("dateAdded", dateAdded)
     }
 }

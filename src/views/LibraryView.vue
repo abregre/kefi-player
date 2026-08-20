@@ -1,13 +1,40 @@
+<script>
+import { ref } from 'vue'
+
+/**
+ * Module scope, NOT inside the `<script setup>` block below — mirrors the fix `FolderList
+ * .vue`'s `expanded` just got, for the same reason. "View in folder" opened from
+ * `/playlist/:id` (a different view entirely, mounted instead of this one) needs to land
+ * THIS view on the Folders tab the next time it mounts, and a `ref` declared inside
+ * `<script setup>` resets to 'songs' every time this component is destroyed and recreated by
+ * the router (there is no `<keep-alive>` on `<RouterView />`, confirmed in T8's notes).
+ * Exported so `PlaylistView.vue` can drive it the same way it drives `FolderList.vue`'s
+ * `expandFolder` — no prop drill, no router query param, no event bus, just the module-level
+ * pattern this app already uses for exactly this kind of cross-navigation state.
+ *
+ * Behaviour change worth flagging: the Library's selected tab now also survives a trip to
+ * Now Playing / Settings / a playlist and back (it used to reset to Songs on every remount);
+ * that is a side effect of making it drivable from outside, not a separate goal.
+ * @type {import('vue').Ref<'songs' | 'albums' | 'artists' | 'folders' | 'playlists'>}
+ */
+export const tab = ref('songs')
+</script>
+
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
+import { usePlaylists } from '../composables/usePlaylists'
+import { useTrackMenu } from '../composables/useTrackMenu'
 import { useLazyArtwork } from '../composables/useLazyArtwork'
 import TrackRow from '../components/TrackRow.vue'
 import AlbumGrid from '../components/AlbumGrid.vue'
 import ArtistList from '../components/ArtistList.vue'
-import FolderList from '../components/FolderList.vue'
+import FolderList, { expandFolder } from '../components/FolderList.vue'
+import PlaylistList from '../components/PlaylistList.vue'
+import TrackMenu from '../components/TrackMenu.vue'
 import { useHorizontalSwipe } from '../composables/useHorizontalSwipe'
 
 const { t } = useI18n()
@@ -26,9 +53,18 @@ const {
   openAppSettings,
 } = useLibrary()
 const player = usePlayer()
+// Only `playlists` (the list-of-lists count for the header) is needed here — the tab body
+// itself pulls Favorites/Recently added/CRUD straight from `usePlaylists()` in
+// PlaylistList.vue, per that composable's own "every component shares one instance" design.
+const { playlists } = usePlaylists()
+const { openTrackMenu } = useTrackMenu()
+const router = useRouter()
 
-const TABS = ['songs', 'albums', 'artists', 'folders']
-const tab = ref('songs')
+// Appended, not inserted: `stepTab` below is index-based with no wrap-around, so putting
+// 'playlists' anywhere but the end would silently change which tab every existing swipe
+// lands on (e.g. a Folders->Songs swipe habit would instead land on the new tab). Appending
+// costs nothing and keeps every existing index stable.
+const TABS = ['songs', 'albums', 'artists', 'folders', 'playlists']
 
 const page = ref(null)
 const segmented = ref(null)
@@ -89,6 +125,14 @@ const countLabel = computed(() => {
   if (tab.value === 'folders') {
     const count = folders.value.length
     return count === 1 ? t('library.count.folder') : t('library.count.folders', { count })
+  }
+  if (tab.value === 'playlists') {
+    // The count of LISTS shown, not tracks: the two fixed smart lists (Favorites, Recently
+    // added) plus however many user playlists exist. Always >= 2 today, so the singular
+    // key is currently unreachable — kept anyway for the same reason every other branch
+    // here has one: a future where a smart list becomes optional should not need a new key.
+    const count = 2 + playlists.value.length
+    return count === 1 ? t('library.count.playlist') : t('library.count.playlists', { count })
   }
   const count = visibleTracks.value.length
   return count === 1 ? t('library.count.song') : t('library.count.songs', { count })
@@ -165,6 +209,41 @@ function playFrom(track) {
 function playGroup(group) {
   if (group.tracks.length === 0) return
   player.setQueue({ uris: group.tracks.map((item) => item.uri), startIndex: 0 })
+}
+
+/**
+ * Playlists tab rows select a LIST, not a track, so they navigate to a detail screen
+ * instead of queuing anything here. `id` is `'favorites'`, `'recently-added'`, or a
+ * playlist's numeric id — the exact shape `/playlist/:id` (T10's route) expects.
+ * @param {'favorites' | 'recently-added' | number} id
+ */
+function goToPlaylist(id) {
+  router.push(`/playlist/${id}`)
+}
+
+/**
+ * The options sheet's one outward event (T8): carries the track whose folder the user wants
+ * to see. `track.folder` IS the folder group's key already — `useLibrary.js`'s `groupBy
+ * ('folder', '')` keys the "MediaStore reported no path" group by the empty string, the exact
+ * value `track.folder` holds in that case (see the `PlayerTrack` typedef) — so there is no
+ * "does this key exist" branch to write here; every track's `folder` names a real, always-
+ * rendered group, including that one.
+ * @param {import('../plugins/player').PlayerTrack} track
+ */
+async function onViewInFolder(track) {
+  expandFolder(track.folder)
+  tab.value = 'folders'
+  // `expandFolder` and the `tab` switch above are both synchronous, so Vue queues a single
+  // render flush for both; `nextTick` resolves once that flush's DOM patch has landed —
+  // including `<FolderList>` itself freshly mounting — which is the earliest point the
+  // folder's (already expanded) row exists to scroll to. Built by scanning every
+  // `[data-folder-key]` row rather than a `querySelector` template string so a folder path
+  // containing a quote character can never break the selector.
+  await nextTick()
+  const row = [...(page.value?.querySelectorAll('[data-folder-key]') ?? [])].find(
+    (el) => el.dataset.folderKey === track.folder,
+  )
+  row?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 </script>
 
@@ -269,18 +348,26 @@ function playGroup(group) {
               :active="player.mediaId.value === track.uri"
               :playing="player.isPlaying.value && player.mediaId.value === track.uri"
               @select="playFrom"
+              @options="openTrackMenu"
             />
           </li>
         </ul>
         <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
         <ArtistList v-else-if="tab === 'artists'" :artists="artists" @select="playGroup" />
         <FolderList
-          v-else
+          v-else-if="tab === 'folders'"
           :folders="folders"
           :current-uri="player.uri.value"
           :playing="player.isPlaying.value"
           @select="({ track, tracks }) => playFromList(tracks, track)"
+          @options="openTrackMenu"
         />
+        <!-- Playlists is a list of LISTS (Decision 8), so it does not filter by the search
+             query the way songs/albums/artists/folders do: Favorites, Recently added and
+             a user playlist are fixed by name/membership, not by matching track text, so
+             there is no well-defined "search hit" for one of them. The search box stays
+             visible for muscle memory but has no effect on this tab, deliberately. -->
+        <PlaylistList v-else @select="goToPlaylist" />
       </template>
 
       <div v-if="status === 'ready' && visibleTracks.length === 0 && query" class="notice">
@@ -289,6 +376,10 @@ function playGroup(group) {
       </div>
     </template>
   </section>
+
+  <!-- Fixed-position and renders nothing until a menu is open (T8), so its place in the
+       template has no effect on this screen's layout. -->
+  <TrackMenu @view-in-folder="onViewInFolder" />
 </template>
 
 <style scoped>

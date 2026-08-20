@@ -4,13 +4,22 @@ import { useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
+import { useTrackMenu } from '../composables/useTrackMenu'
 import { useVerticalDismiss } from '../composables/useVerticalDismiss'
+import TrackMenu from '../components/TrackMenu.vue'
 import { formatMs } from '../utils/format'
+// `expandFolder`/`tab` are T13's module-scope shared state (FolderList.vue/LibraryView.vue),
+// not a component import — same pattern PlaylistView.vue already uses for this exact
+// cross-view navigation. This file only reads/writes that shared state; it does not touch
+// either file (Must NOT Do).
+import { expandFolder } from '../components/FolderList.vue'
+import { tab as libraryTab } from '../views/LibraryView.vue'
 
 const router = useRouter()
 const { t } = useI18n()
 const player = usePlayer()
 const { trackByUri, artwork, loadArtwork } = useLibrary()
+const { openTrackMenu } = useTrackMenu()
 
 /** Repeat cycles the way every music player does: none → whole queue → this track. */
 const REPEAT_CYCLE = { off: 'all', all: 'one', one: 'off' }
@@ -78,6 +87,28 @@ function cycleRepeat() {
   player.setRepeatMode(REPEAT_CYCLE[player.repeatMode.value] ?? 'all')
 }
 
+/*
+ * Same cross-view navigation PlaylistView.vue already does — copied its shape rather
+ * than inventing a second one. `track` is the emit payload TrackMenu.vue hands us, not
+ * this screen's own `track` computed above: the player may have moved on to a different
+ * uri by the time the user taps this, but the sheet was open for a specific track object
+ * and that is the one whose folder should open. `track.folder === ''` is a real group key
+ * (confirmed against `useLibrary.js`'s `groupBy('folder', '')`, same as PlaylistView/
+ * LibraryView), not a case needing special handling.
+ *
+ * TrackMenu.vue closes the sheet itself before emitting `view-in-folder` (see its own
+ * onViewInFolder), so nothing here calls `closeTrackMenu()` — that already happened by
+ * the time this runs. `expandFolder`/`libraryTab` are set synchronously, immediately
+ * before the (async) navigation, so `/library` mounts with both already applied: no
+ * ordering gap where the Folders tab would render, then flip.
+ * @param {import('../plugins/player').PlayerTrack} track
+ */
+function onViewInFolder(track) {
+  expandFolder(track.folder)
+  libraryTab.value = 'folders'
+  router.push('/library')
+}
+
 const page = ref(null)
 
 /*
@@ -94,7 +125,13 @@ const page = ref(null)
  */
 const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
   onDismiss: () => router.back(),
-  ignore: '.seek-input, .icon-button, .play',
+  // '.backdrop' is TrackMenu.vue's own root element (its `<Transition>` renders nothing
+  // else at the top level). It is mounted as a DOM descendant of `.page` below, so
+  // without this a touch starting anywhere inside the sheet — scrolling the
+  // add-to-playlist list, or just a stray swipe on it — would bubble up to this
+  // listener and drag the Now Playing screen out from underneath the sheet that is
+  // supposed to be sitting on top of it.
+  ignore: '.seek-input, .icon-button, .play, .backdrop',
 })
 </script>
 
@@ -112,7 +149,28 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
         </svg>
       </button>
       <span class="bar-title">{{ t('nowPlaying.title') }}</span>
-      <span class="bar-spacer" />
+      <!-- `track` is undefined both when nothing is loaded (the `v-else="empty"` state
+           below) and when the player is sitting on a uri the library never indexed (a
+           real possibility — see `track`'s own comment above). TrackMenu needs a real
+           track object (`track.uri`/`track.title`, its own path derivation), so there is
+           nothing useful this button could open in that case. Disabled rather than
+           hidden: it keeps this header's width/centering exactly as `.bar-spacer` already
+           reserved it (no layout shift when a track loads), and disabled-but-visible is
+           this app's own idiom for "not applicable right now" (TrackMenu.vue's own
+           `.option:disabled` during a busy round trip). -->
+      <button
+        type="button"
+        class="icon-button"
+        :disabled="!track"
+        :aria-label="t('trackMenu.open')"
+        @click="openTrackMenu(track)"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="12" cy="19" r="1.7" />
+        </svg>
+      </button>
     </header>
 
     <template v-if="player.mediaId.value">
@@ -227,6 +285,12 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
       <p class="empty-title">{{ t('nowPlaying.empty.title') }}</p>
       <p class="hint">{{ t('nowPlaying.empty.body') }}</p>
     </div>
+
+    <!-- Per T8's MOUNTING RECIPE: renders nothing (`v-if="activeTrack"` at its own root)
+         until `openTrackMenu` above opens it, so its placement here doesn't affect this
+         screen's layout. It DOES sit inside `.page`'s DOM subtree though, which is why
+         its root is in `useVerticalDismiss`'s `ignore` list above. -->
+    <TrackMenu @view-in-folder="onViewInFolder" />
   </section>
 </template>
 
@@ -268,10 +332,6 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
   color: var(--text-muted);
 }
 
-.bar-spacer {
-  width: 2.4rem;
-}
-
 .icon-button {
   width: 2.4rem;
   height: 2.4rem;
@@ -291,6 +351,12 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
 
 .icon-button.on {
   color: var(--accent);
+}
+
+/* Same "not applicable right now" idiom as TrackMenu.vue's `.option:disabled` — no new
+   state colour invented for it. */
+.icon-button:disabled {
+  opacity: 0.5;
 }
 
 .badge {

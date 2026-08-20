@@ -772,6 +772,328 @@ fi
 js "location.hash = '#/library'" > /dev/null
 sleep 1
 
+# ── Playlists tab, favourites, and the track options menu (T16) ──────────────
+#
+# THIS SECTION HAS NEVER BEEN EXECUTED. The user withdrew device access ("stop testing on
+# my mobile device") and the emulator was retired ("stamata na anoigeis ton emulator")
+# during this plan's execution — every check below was authored against the real markup
+# (PlaylistList.vue, PlaylistView.vue, TrackMenu.vue, TrackRow.vue, LibraryView.vue) and the
+# real plugin contract (player.js / PlayerPlugin.kt), but no run has ever confirmed a single
+# line of it actually passes. A first real run should watch for:
+#   - CDP/UI timing: every `sleep` below is a guess at how long a route change, a Vue
+#     re-render, or a Room round trip takes on a real device. A FAIL immediately after a
+#     `.click()` or a force-stop is more likely a race than a real regression — lengthen the
+#     adjacent sleep before concluding the feature is broken.
+#   - T15 (the i18n strings) had NOT landed when this was written: most `t()` labels still
+#     render as their raw key (e.g. `library.tab.playlists`, `playlists.favorites`). Nothing
+#     below asserts on that visible text for exactly that reason — only on structure
+#     (`.segment`, `.playlist-row`, `.row-menu`, `.backdrop`, `.option`), counts, and data the
+#     player itself supplies (titles, paths). `library.count.song(s)` is the one exception —
+#     it predates this plan and already exists in both `en.js`/`el.js`, which is why counts
+#     are asserted on directly.
+#   - The reorder check does NOT exercise the drag gesture — CDP cannot synthesise the
+#     long-press-then-drag `useDragReorder.js` requires. It calls `reorderPlaylist` directly,
+#     the same call the gesture's own `onDragCommit` makes on drop, and only proves the
+#     persistence half. See that check's own comment for the full reasoning.
+#   - Nothing in this section calls `pm clear`, so nothing needs a `pm grant` re-grant —
+#     every "survives force-stop + relaunch" check below uses `am force-stop` only, same as
+#     the existing T12 section above.
+
+goto_library() {
+  js "location.hash = '#/library'" > /dev/null
+  sleep 1
+}
+
+# TABS = ['songs', 'albums', 'artists', 'folders', 'playlists'] (LibraryView.vue) — index-
+# based, same left-to-right order the segmented control itself renders.
+select_tab() {
+  js "document.querySelectorAll('.segment')[$1]?.click()" > /dev/null
+  sleep 1
+}
+
+# Mirrors usePlaylists.js's own pathOf() exactly (folder === '' ? displayName : folder + '/'
+# + displayName), reading from the $TRACKS snapshot the preflight section already captured,
+# so a path built here always matches what the app itself would derive for the same track.
+pathof_by_title() {
+  node -e '
+    const { tracks } = JSON.parse(process.argv[1])
+    const track = tracks.find((t) => t.title === process.argv[2])
+    if (!track) { console.log(""); process.exit(0) }
+    console.log(track.folder === "" ? track.displayName : `${track.folder}/${track.displayName}`)
+  ' "$TRACKS" "$1"
+}
+
+step "T16 — Playlists tab: five tabs, fifth reachable"
+
+goto_library
+SEGMENT_COUNT=$(js "document.querySelectorAll('.segment').length")
+[[ "$SEGMENT_COUNT" == 5 ]] &&
+  pass "T16 the segmented control reports 5 segments" ||
+  fail "T16 the segmented control reports $SEGMENT_COUNT segments, expected 5"
+
+select_tab 4
+SELECTED_INDEX=$(js "[...document.querySelectorAll('.segment')].findIndex((el) => el.classList.contains('selected'))")
+PLAYLIST_ROW_COUNT=$(js "document.querySelectorAll('.playlist-row').length")
+
+[[ "$PLAYLIST_ROW_COUNT" -ge 3 ]] &&
+  pass "T16 selecting the 5th segment renders $PLAYLIST_ROW_COUNT .playlist-row rows (PlaylistList actually mounted, not just a class toggle)" ||
+  fail "T16 selecting the 5th segment rendered only $PLAYLIST_ROW_COUNT .playlist-row rows (expected >= 3: Favorites, Recently added, the create affordance)"
+
+[[ "$SELECTED_INDEX" == 4 ]] &&
+  pass "T16 the 5th segment carries .selected after being clicked" ||
+  fail "T16 expected segment index 4 to carry .selected, got index $SELECTED_INDEX"
+
+step "T16 — Playlists tab content: Favorites and Recently added show real counts"
+
+goto_library
+select_tab 4
+
+FAV_META=$(js "document.querySelectorAll('.playlist-row')[0]?.querySelector('.meta')?.textContent ?? ''")
+[[ "$FAV_META" =~ [0-9]+ ]] &&
+  pass "T16 Favorites row meta line shows a count ('$FAV_META')" ||
+  fail "T16 Favorites row meta line has no digit in it ('$FAV_META') — favoriteTracks may not be wired to the row"
+
+RECENT_META=$(js "document.querySelectorAll('.playlist-row')[1]?.querySelector('.meta')?.textContent ?? ''")
+RECENT_META_NUM=$(node -e 'console.log((process.argv[1].match(/\d+/) || ["?"])[0])' "$RECENT_META")
+EXPECTED_RECENT=$(node -e 'const { tracks } = JSON.parse(process.argv[1]); console.log(Math.min(tracks.length, 15))' "$TRACKS")
+[[ "$RECENT_META_NUM" == "$EXPECTED_RECENT" ]] &&
+  pass "T16 Recently added row meta shows $RECENT_META_NUM, matching min(library size, 15) = $EXPECTED_RECENT" ||
+  fail "T16 Recently added row meta is '$RECENT_META' (parsed '$RECENT_META_NUM'), expected $EXPECTED_RECENT"
+
+step "T16 — Create a playlist through the DOM, then confirm it survives a relaunch"
+
+NEW_PLAYLIST_ID=""
+PLAYLIST_NAME="QA Playlist $(date +%s)"
+PLAYLIST_NAME_JSON=$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$PLAYLIST_NAME")
+
+goto_library
+select_tab 4
+
+CREATE_CLICK=$(js "(() => {
+  const el = document.querySelector('.create-row')
+  if (!el) return 'NO_ELEMENT'
+  el.click()
+  return 'OK'
+})()")
+
+if [[ "$CREATE_CLICK" != '"OK"' ]]; then
+  fail "T16 create playlist: .create-row was not found on the Playlists tab"
+else
+  sleep 1
+  TYPE_RESULT=$(js "(() => {
+    const el = document.querySelector('.create-input')
+    if (!el) return 'NO_INPUT'
+    el.value = $PLAYLIST_NAME_JSON
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return el.value
+  })()")
+
+  if [[ "$TYPE_RESULT" != *"$PLAYLIST_NAME"* ]]; then
+    fail "T16 create playlist: typing into .create-input did not stick (got $TYPE_RESULT)"
+  else
+    CONFIRM_CLICK=$(js "(() => {
+      const el = document.querySelector('.create-confirm')
+      if (!el) return 'NO_ELEMENT'
+      el.click()
+      return 'OK'
+    })()")
+
+    if [[ "$CONFIRM_CLICK" != '"OK"' ]]; then
+      fail "T16 create playlist: .create-confirm was not found after typing a name"
+    else
+      sleep 2
+      # submitCreate() navigates to the new playlist's own detail screen on success
+      # (PlaylistList.vue's `emit('select', id)` -> LibraryView's goToPlaylist), so the new
+      # row is not visible again until coming back to the Playlists tab.
+      HASH_AFTER_CREATE=$(js "location.hash")
+      NEW_PLAYLIST_ID=$(node -e '
+        const hash = JSON.parse(process.argv[1])
+        const m = hash.match(/\/playlist\/(\d+)/)
+        console.log(m ? m[1] : "")
+      ' "$HASH_AFTER_CREATE")
+
+      goto_library
+      select_tab 4
+      CREATED_META=$(js "(() => {
+        const row = [...document.querySelectorAll('.playlist-row')].find(
+          (r) => r.querySelector('.name')?.textContent === $PLAYLIST_NAME_JSON,
+        )
+        return row ? row.querySelector('.meta').textContent : null
+      })()")
+
+      if [[ "$CREATED_META" == null ]]; then
+        fail "T16 create playlist: no .playlist-row named '$PLAYLIST_NAME' appeared after submitting (hash was $HASH_AFTER_CREATE)"
+      else
+        CREATED_META_NUM=$(node -e 'console.log((JSON.parse(process.argv[1]).match(/\d+/) || ["?"])[0])' "$CREATED_META")
+        [[ "$CREATED_META_NUM" == 0 ]] &&
+          pass "T16 create playlist: '$PLAYLIST_NAME' appeared with a 0-track count" ||
+          fail "T16 create playlist: '$PLAYLIST_NAME' appeared with meta $CREATED_META (parsed $CREATED_META_NUM), expected 0"
+
+        "${EMU[@]}" shell am force-stop "$PKG"
+        sleep 2
+        launch_app || fail "T16 create playlist: app did not come back after force-stop"
+        sleep 2
+        goto_library
+        select_tab 4
+
+        SURVIVED=$(js "[...document.querySelectorAll('.playlist-row .name')].some((el) => el.textContent === $PLAYLIST_NAME_JSON)")
+        [[ "$SURVIVED" == true ]] &&
+          pass "T16 create playlist: '$PLAYLIST_NAME' survived force-stop + relaunch (Room persisted it, not just a ref)" ||
+          fail "T16 create playlist: '$PLAYLIST_NAME' did NOT survive force-stop + relaunch"
+      fi
+    fi
+  fi
+fi
+
+step "T16 — Favourite round trip: toggle via the options sheet, confirm it persists"
+
+goto_library
+select_tab 0
+
+FIRST_TITLE=$(js "document.querySelectorAll('.track-row .title')[0]?.textContent ?? ''")
+FIRST_PATH=$(pathof_by_title "$FIRST_TITLE")
+
+if [[ -z "$FIRST_PATH" ]]; then
+  fail "T16 favourite round trip: could not resolve a path for the first Songs row ('$FIRST_TITLE')"
+else
+  FAV_BEFORE=$(js "Capacitor.Plugins.Player.listFavorites()")
+  WAS_FAVOURITE=$(node -e 'const { paths } = JSON.parse(process.argv[1]); console.log(paths.includes(process.argv[2]))' "$FAV_BEFORE" "$FIRST_PATH")
+
+  SHEET_CLICK=$(js "(() => {
+    const el = document.querySelectorAll('.row-menu')[0]
+    if (!el) return 'NO_ELEMENT'
+    el.click()
+    return 'OK'
+  })()")
+
+  if [[ "$SHEET_CLICK" != '"OK"' ]]; then
+    fail "T16 favourite round trip: .row-menu was not found on the first Songs row"
+  else
+    sleep 1
+    SHEET_OPEN=$(js "document.querySelector('.backdrop') !== null")
+    if [[ "$SHEET_OPEN" != true ]]; then
+      fail "T16 favourite round trip: .backdrop did not appear after clicking .row-menu"
+    else
+      # The favourite/unfavourite toggle is the FIRST .option in the sheet's 'menu' step
+      # (TrackMenu.vue), which is exactly the step it opens on.
+      js "document.querySelectorAll('.option')[0]?.click()" > /dev/null
+      sleep 1
+      js "document.querySelector('.backdrop')?.click()" > /dev/null
+      sleep 1
+
+      FAV_AFTER=$(js "Capacitor.Plugins.Player.listFavorites()")
+      IS_FAVOURITE_AFTER=$(node -e 'const { paths } = JSON.parse(process.argv[1]); console.log(paths.includes(process.argv[2]))' "$FAV_AFTER" "$FIRST_PATH")
+      FAV_COUNT_AFTER=$(node -e 'console.log(JSON.parse(process.argv[1]).paths.length)' "$FAV_AFTER")
+      EXPECTED_AFTER=$([[ "$WAS_FAVOURITE" == true ]] && echo false || echo true)
+
+      [[ "$IS_FAVOURITE_AFTER" == "$EXPECTED_AFTER" ]] &&
+        pass "T16 favourite round trip: '$FIRST_TITLE' flipped from $WAS_FAVOURITE to $IS_FAVOURITE_AFTER via the sheet" ||
+        fail "T16 favourite round trip: '$FIRST_TITLE' is $IS_FAVOURITE_AFTER after the toggle, expected $EXPECTED_AFTER (was $WAS_FAVOURITE)"
+
+      goto_library
+      select_tab 4
+      FAV_META_NOW=$(js "document.querySelectorAll('.playlist-row')[0]?.querySelector('.meta')?.textContent ?? ''")
+      FAV_META_NOW_NUM=$(node -e 'console.log((process.argv[1].match(/\d+/) || ["?"])[0])' "$FAV_META_NOW")
+      [[ "$FAV_META_NOW_NUM" == "$FAV_COUNT_AFTER" ]] &&
+        pass "T16 favourite round trip: the Favorites row meta now shows $FAV_META_NOW_NUM, matching listFavorites()'s $FAV_COUNT_AFTER paths" ||
+        fail "T16 favourite round trip: Favorites row meta is '$FAV_META_NOW', expected to reflect $FAV_COUNT_AFTER favourites"
+
+      "${EMU[@]}" shell am force-stop "$PKG"
+      sleep 2
+      launch_app || fail "T16 favourite round trip: app did not come back after force-stop"
+      sleep 2
+      goto_library
+      select_tab 4
+
+      FAV_AFTER_RESTART=$(js "Capacitor.Plugins.Player.listFavorites()")
+      IS_FAVOURITE_RESTART=$(node -e 'const { paths } = JSON.parse(process.argv[1]); console.log(paths.includes(process.argv[2]))' "$FAV_AFTER_RESTART" "$FIRST_PATH")
+      [[ "$IS_FAVOURITE_RESTART" == "$EXPECTED_AFTER" ]] &&
+        pass "T16 favourite round trip: the favourite survived force-stop + relaunch (Room, not a ref)" ||
+        fail "T16 favourite round trip: after relaunch '$FIRST_TITLE' favourite state is $IS_FAVOURITE_RESTART, expected $EXPECTED_AFTER"
+    fi
+  fi
+fi
+
+step "T16 — Reorder persistence (persistence contract only — see comment)"
+
+# HONESTY NOTE, per the plan's explicit requirement: a real reorder is a long-press-then-
+# drag driven by touch events (useDragReorder.js: a 400ms hold within 10px, THEN
+# touchmove/touchend). CDP's Runtime.evaluate can synthesise ONE call at a time with
+# userGesture:true — it cannot fabricate a timed touchstart/touchmove/touchend sequence that
+# the composable's own listeners would treat as a genuine drag, and dispatching synthetic
+# TouchEvents this composable was never built to trust would be exactly the placebo check
+# this task was told not to write. So this check drives the SAME call the gesture commits
+# through on drop — Capacitor.Plugins.Player.reorderPlaylist({ id, paths }), the exact call
+# PlaylistView.vue's onDragCommit makes — directly, and verifies the detail screen re-renders
+# in the new order after a force-stop + relaunch. That proves Room's reorderPlaylist
+# persistence contract end-to-end; it does NOT exercise the drag gesture itself, which stays
+# a hands-on-only item (plan's F5) until a device is available again.
+
+if [[ -z "$NEW_PLAYLIST_ID" ]]; then
+  fail "T16 reorder: no playlist id available (the create-playlist check above did not produce one)"
+else
+  FIRST_TWO=$(node -e '
+    const { tracks } = JSON.parse(process.argv[1])
+    const pathOf = (t) => (t.folder === "" ? t.displayName : `${t.folder}/${t.displayName}`)
+    console.log(JSON.stringify(tracks.slice(0, 2).map((t) => ({ title: t.title, path: pathOf(t) }))))
+  ' "$TRACKS")
+  PATH1=$(node -e 'console.log(JSON.parse(process.argv[1])[0].path)' "$FIRST_TWO")
+  PATH2=$(node -e 'console.log(JSON.parse(process.argv[1])[1].path)' "$FIRST_TWO")
+  TITLE2=$(node -e 'console.log(JSON.parse(process.argv[1])[1].title)' "$FIRST_TWO")
+
+  # SETUP, not the check itself: seed the playlist with these 2 tracks in a known order.
+  SEED_PATHS_JSON=$(node -e 'console.log(JSON.stringify([process.argv[1], process.argv[2]]))' "$PATH1" "$PATH2")
+  js "Capacitor.Plugins.Player.addToPlaylist({ id: $NEW_PLAYLIST_ID, paths: $SEED_PATHS_JSON })" > /dev/null
+
+  # THE CHECK'S OWN ACTION: the exact call onDragCommit makes, with the two paths swapped.
+  SWAPPED_PATHS_JSON=$(node -e 'console.log(JSON.stringify([process.argv[2], process.argv[1]]))' "$PATH1" "$PATH2")
+  js "Capacitor.Plugins.Player.reorderPlaylist({ id: $NEW_PLAYLIST_ID, paths: $SWAPPED_PATHS_JSON })" > /dev/null
+
+  "${EMU[@]}" shell am force-stop "$PKG"
+  sleep 2
+  launch_app || fail "T16 reorder: app did not come back after force-stop"
+  sleep 2
+  js "location.hash = '#/playlist/$NEW_PLAYLIST_ID'" > /dev/null
+  sleep 2
+
+  FIRST_RENDERED=$(js "document.querySelectorAll('.row-wrap .title')[0]?.textContent ?? ''")
+  [[ "$FIRST_RENDERED" == "$TITLE2" ]] &&
+    pass "T16 reorder: after force-stop + relaunch the detail screen renders '$FIRST_RENDERED' first, matching the order persisted via reorderPlaylist" ||
+    fail "T16 reorder: after relaunch the detail screen's first row is '$FIRST_RENDERED', expected '$TITLE2' (reorderPlaylist did not persist the swap)"
+fi
+
+step "T16 — The options sheet opens and closes"
+
+goto_library
+select_tab 0
+
+SHEET_CLICK2=$(js "(() => {
+  const el = document.querySelectorAll('.row-menu')[0]
+  if (!el) return 'NO_ELEMENT'
+  el.click()
+  return 'OK'
+})()")
+
+if [[ "$SHEET_CLICK2" != '"OK"' ]]; then
+  fail "T16 sheet open/close: .row-menu was not found on the first Songs row"
+else
+  sleep 1
+  SHEET_PRESENT=$(js "document.querySelector('.backdrop') !== null")
+  [[ "$SHEET_PRESENT" == true ]] &&
+    pass "T16 sheet: clicking .row-menu renders .backdrop" ||
+    fail "T16 sheet: .backdrop did not appear after clicking .row-menu"
+
+  js "document.querySelector('.backdrop')?.click()" > /dev/null
+  sleep 1
+  SHEET_GONE=$(js "document.querySelector('.backdrop') === null")
+  [[ "$SHEET_GONE" == true ]] &&
+    pass "T16 sheet: clicking the backdrop removes .backdrop from the DOM" ||
+    fail "T16 sheet: .backdrop is still present after a backdrop click"
+fi
+
+# Navigate back to library so the existing Summary step is clean.
+goto_library
+
 step "Summary"
 echo "$((CHECKS - FAILURES))/$CHECKS checks passed"
 if [[ "$FAILURES" -gt 0 ]]; then

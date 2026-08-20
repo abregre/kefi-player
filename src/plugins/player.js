@@ -30,6 +30,11 @@ import { registerPlugin } from '@capacitor/core'
  * @property {string} folder Containing directory as the user would recognise it
  *   (`Music/kefi-qa`), with no leading or trailing slash. Drives the library's Folders
  *   grouping; empty string when MediaStore reports no path.
+ * @property {string} displayName The file name on disk, with extension (`Zeibekiko.mp3`).
+ *   `folder + '/' + displayName` is the identity playlists and favourites key off.
+ * @property {number} dateAdded Epoch SECONDS (not milliseconds) that MediaStore indexed this
+ *   file at — when the scanner saw it, not when the user acquired it. Bulk-scanned libraries
+ *   tie often at second resolution, since every file from one scan lands in the same second.
  */
 
 /**
@@ -81,6 +86,34 @@ import { registerPlugin } from '@capacitor/core'
  * @property {() => Promise<void>} openAppSettings
  *   Opens this app's page in system Settings — the only route back once the audio
  *   permission is `denied`, since Android then refuses to show the dialog again.
+ * @property {() => Promise<{ playlists: Array<{ id: number, name: string, count: number }> }>} listPlaylists
+ *   Every user-created playlist with its live track count. Does NOT include the Favorites or
+ *   Recently added smart lists — those are computed client-side from `listFavorites`/`listTracks`.
+ * @property {(options: { name: string }) => Promise<{ id: number }>} createPlaylist
+ *   Creates an empty playlist and resolves its new id.
+ * @property {(options: { id: number, name: string }) => Promise<void>} renamePlaylist
+ * @property {(options: { id: number }) => Promise<void>} deletePlaylist
+ *   Deletes the playlist and all its items. Not reversible; the UI confirms before calling this.
+ * @property {(options: { id: number, paths: string[] }) => Promise<void>} addToPlaylist
+ *   Appends `paths` to the end of the playlist, in the order given. A `path` is
+ *   `folder + '/' + displayName` (see {@link PlayerTrack}`.displayName`) — the identity chosen
+ *   with the user over the MediaStore numeric id. It does NOT survive the file being moved or
+ *   renamed; that loss is an accepted consequence, not a bug, and every method below that takes
+ *   or returns a `path`/`paths` uses this same identity. Idempotent per path: a path already in
+ *   the playlist is not appended a second time.
+ * @property {(options: { id: number, path: string }) => Promise<void>} removeFromPlaylist
+ * @property {(options: { id: number, paths: string[] }) => Promise<void>} reorderPlaylist
+ *   `paths` is the FULL new order, not a from/to index pair — the caller always sends every
+ *   path the playlist holds, rewritten in one transaction, never a partial patch.
+ * @property {(options: { id: number }) => Promise<{ paths: string[] }>} listPlaylistPaths
+ *   Current membership, in playlist order.
+ * @property {() => Promise<{ paths: string[] }>} listFavorites
+ * @property {(options: { path: string, favorite: boolean }) => Promise<{ favorite: boolean }>} setFavorite
+ *   Sets (not toggles) favourite status for one path and echoes back the resulting state.
+ * @property {(options: { uri: string, type: 'ringtone' | 'notification' }) => Promise<{ granted: boolean }>} setAsRingtone
+ *   Sets the device ringtone or notification tone to `uri`. Gated behind the `WRITE_SETTINGS`
+ *   special permission: resolves `{ granted: false }` rather than rejecting when it is absent,
+ *   which is the UI's cue to route the user to system settings instead of showing an error.
  * @property {(eventName: 'playerState', listener: (event: PlayerSnapshot) => void) => Promise<import('@capacitor/core').PluginListenerHandle>} addListener
  *   Also fires for `eventName: 'trackUnavailable'` with a {@link PlayerTrackUnavailable}
  *   payload: emitted whenever the native controller fails to play a queue item (deleted/

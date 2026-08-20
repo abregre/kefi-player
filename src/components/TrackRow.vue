@@ -11,7 +11,7 @@ const props = defineProps({
   playing: { type: Boolean, default: false },
 })
 
-defineEmits(['select'])
+defineEmits(['select', 'options'])
 
 const { t } = useI18n()
 const { artwork } = useLibrary()
@@ -28,47 +28,76 @@ const cover = computed(() => artwork.value[props.track.id] ?? null)
 </script>
 
 <template>
-  <button
-    type="button"
-    class="row track-row"
-    :class="{ active: props.active }"
-    :data-track-id="props.track.id"
-    @click="$emit('select', props.track)"
-  >
-    <span class="art" :class="{ 'has-cover': cover }">
-      <img v-if="cover" class="art-image" :src="cover" alt="" />
-      <span v-else class="art-placeholder" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="8.2" />
-          <circle cx="12" cy="12" r="2.1" />
-        </svg>
+  <!-- The row now holds TWO independently tappable buttons (play the track, open its
+       options), and nesting one button inside another is invalid HTML — the inner one is
+       unreachable by assistive tech, since focus/activation on a nested interactive
+       element is undefined. So the root is a plain div and each control is its own
+       sibling button. `data-track-id` moves here (not onto `.row-main`) because this is
+       "the row" that `useLazyArtwork`'s observer means to watch — it still spans the
+       row's full width, so the intersection it reports is unchanged. -->
+  <div class="row track-row" :class="{ active: props.active }" :data-track-id="props.track.id">
+    <button type="button" class="row-main" @click="$emit('select', props.track)">
+      <span class="art" :class="{ 'has-cover': cover }">
+        <img v-if="cover" class="art-image" :src="cover" alt="" />
+        <span v-else class="art-placeholder" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="8.2" />
+            <circle cx="12" cy="12" r="2.1" />
+          </svg>
+        </span>
+        <!-- Three bars over the cover, animated only while this row is the one actually
+             playing: motion is the cheapest way to say "this is the sound you hear", and
+             laying it over the artwork keeps both facts visible at once. -->
+        <span
+          v-if="props.active"
+          class="bars"
+          :class="{ animate: props.playing }"
+          aria-hidden="true"
+        >
+          <i /><i /><i />
+        </span>
       </span>
-      <!-- Three bars over the cover, animated only while this row is the one actually
-           playing: motion is the cheapest way to say "this is the sound you hear", and
-           laying it over the artwork keeps both facts visible at once. -->
-      <span
-        v-if="props.active"
-        class="bars"
-        :class="{ animate: props.playing }"
-        aria-hidden="true"
-      >
-        <i /><i /><i />
+      <span class="body">
+        <span class="title">{{ props.track.title }}</span>
+        <span class="sub">{{ props.track.artist || t('nowPlaying.unknownArtist') }}</span>
       </span>
-    </span>
-    <span class="body">
-      <span class="title">{{ props.track.title }}</span>
-      <span class="sub">{{ props.track.artist || t('nowPlaying.unknownArtist') }}</span>
-    </span>
-    <span class="duration">{{ formatMs(props.track.durationMs) }}</span>
-  </button>
+      <span class="duration">{{ formatMs(props.track.durationMs) }}</span>
+    </button>
+    <button
+      type="button"
+      class="row-menu"
+      :aria-label="t('trackMenu.open')"
+      @click="$emit('options', props.track)"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="12" cy="5" r="1.7" />
+        <circle cx="12" cy="12" r="1.7" />
+        <circle cx="12" cy="19" r="1.7" />
+      </svg>
+    </button>
+  </div>
 </template>
 
 <style scoped>
 .row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
   width: 100%;
+  border-radius: 0.6rem;
+}
+
+/* Everything the row used to be (art, title/artist, duration) plus the tap feedback,
+   now scoped to just this button since `.row-menu` sits beside it and must not light up
+   when the row is tapped to play. */
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  /* Flex item AND the parent of `.body`'s own long, unbreakable title text — without this
+     its automatic minimum width would grow to fit that text (see App.vue:92-107 for the
+     bug this exact pattern already caused once), squeezing `.row-menu` instead of eliding. */
+  min-width: 0;
   padding: 0.6rem 0.25rem;
   background: transparent;
   border: 0;
@@ -76,8 +105,30 @@ const cover = computed(() => artwork.value[props.track.id] ?? null)
   text-align: left;
 }
 
-.row:active {
+.row-main:active {
   background: var(--surface-1);
+}
+
+/* Secondary icon-button idiom used across the app (MiniPlayer's `.side`, Now Playing's
+   `.icon-button`): 2.4rem box, ~1.4rem glyph, transparent background, muted colour, no
+   `:active` state — a menu button lighting up on tap would read as "this did something"
+   when all it did was open a sheet. */
+.row-menu {
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin-right: 0.25rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.row-menu svg {
+  width: 1.4rem;
+  height: 1.4rem;
 }
 
 .art {

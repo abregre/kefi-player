@@ -15,9 +15,11 @@ one deliberate exception; see below.
   off or the app backgrounded, with a MediaStyle notification and working
   lock-screen / media-button controls. Audio focus and becoming-noisy are handled by
   Media3, not by hand.
-- **Reads the whole device library with no database.** One `MediaStore.Audio` query
-  on demand — no Room, no SQLite, no cache table, no `ContentObserver`. Artwork is
-  fetched per track, lazily, as a base64 JPEG.
+- **Reads the whole device library itself with no database.** One `MediaStore.Audio`
+  query on demand for the track listing — no cache table, no `ContentObserver`.
+  Playlists and favourites are the one exception: they live in a small Room database,
+  described in "Playlists and favourites" below. Artwork is fetched per track, lazily,
+  as a base64 JPEG.
 - **Library in four groupings** — Songs, Albums, Artists, Folders — with in-memory
   search, switched by tapping a tab or swiping the page sideways.
   Every sort and every search compare goes through `Intl.Collator('el', { sensitivity:
@@ -36,9 +38,9 @@ one deliberate exception; see below.
 - **Degrades instead of stalling.** A deleted or unreadable file is skipped, reported
   in the UI, and the queue moves on.
 
-Deliberately **not** in this version: playlists and favourites, sleep timer, playback
-speed, an equalizer, streaming, or — outside the hidden downloader tab described below —
-any network use at all.
+Deliberately **not** in this version: sleep timer, playback speed, an equalizer,
+streaming, or — outside the hidden downloader tab described below — any network use
+at all.
 
 ## Requirements
 
@@ -114,13 +116,67 @@ Four things are **not** scriptable and stay manual: audibility, real Bluetooth
 A2DP/AVRCP routing, lock-screen control appearance, and wired-headset unplug. Every
 scripted signal proves the pipeline reached the mixer, never that sound came out.
 
+## Playlists and favourites
+
+A fifth library tab, alongside Songs / Albums / Artists / Folders: a list of lists —
+**Favorites**, **Recently added**, and any user-created playlists, each row showing its
+track count. Tapping one opens its own screen.
+
+**What "Recently added" means**: the newest 15 tracks by MediaStore's `DATE_ADDED`, which
+is when the media scanner indexed the file on the device — not when the user actually
+acquired it. A library copied onto the device in one pass will have most files sharing
+that same timestamp, so ties are broken by title, through the same Greek-aware collator
+used everywhere else in the app. A file MediaStore reports no `DATE_ADDED` for is treated
+as `0` and sorts last, not first.
+
+**Where the data lives**: a Room database, `kefi-library.db` (schema version 1 — nothing
+has shipped yet, so there are no migrations), reached only from the native side through
+the app's own Capacitor plugin; the web layer never sees SQL. Three tables, exactly as
+Room built them: `playlists` (`id` autoincrement, `name`, `createdAt`), `playlist_items`
+(`id` autoincrement, `playlistId` → `playlists.id` with `ON DELETE CASCADE`, `path`,
+`position`, and a unique index on `(playlistId, path)` so a track can't land in the same
+playlist twice), and `favorites` (`path` as primary key, `addedAt`). It stores nothing
+beyond what's already on the device and makes no network call. Room is wired through
+**kapt, not KSP**: no KSP release targets this project's Kotlin version, `2.2.10` — KSP's
+versioning jumped straight from `2.2.0` to a decoupled `2.3.x` scheme, skipping
+`2.2.10`/`.20`/`.21` entirely. kapt ships inside the `kotlin-gradle-plugin` already on
+this build's classpath, so unlike KSP it has no separately-versioned artifact to
+reconcile against Kotlin — the full diagnosis is recorded in
+`.claude/notepads/kefi-player-playlists-tab/learnings.md` under `## T2`, so the next
+person to touch this build doesn't go try KSP again.
+
+**The identity choice, and its cost**: playlist and favourite membership is keyed by a
+track's relative path (`folder/filename`), not MediaStore's numeric id — a rescan
+reassigns ids, but not paths. This is a deliberate choice, not a limitation apologised
+for: the accepted cost is that moving or renaming a file drops it out of every playlist
+and out of favourites, silently, with nothing trying to chase it back. There is no
+content hashing.
+
+**What you can do**: create, rename, and delete a playlist; add and remove tracks; drag
+to reorder tracks inside a user-created playlist. Favorites and Recently added have a
+fixed order and cannot be renamed, reordered, or deleted — they are smart lists over the
+same data, not rows in the `playlists` table.
+
+**The track options menu**: reached from a kebab button on every track row, and from Now
+Playing — the same menu either way: Favourite/Unfavourite, Add to playlist, Set as
+ringtone, Set as notification, View in folder. There is deliberately no one-tap heart
+anywhere in the UI; favouriting only happens through this menu. Setting a ringtone needs
+Android's `WRITE_SETTINGS` special permission, which the OS grants only through a trip to
+its own Settings app, never through the normal runtime-permission dialog — so the first
+attempt sends the user there instead of simply failing.
+
+**Two side effects on existing screens, worth calling out because they're visible**: a
+folder expanded in the Folders tab now stays expanded after leaving and returning to the
+Library — a long-standing code comment already claimed this, but the state lived
+per-screen-instance and reset every time; that's now actually true. And the Library's
+selected tab (Songs / Albums / Artists / Folders / Playlists) now survives navigating
+away and back too, where it used to reset to Songs.
+
 ## Roadmap
 
 Named here so the next piece of work starts from a written baseline:
 
-1. **Playlists and favourites** — the first feature that genuinely needs persistence
-   beyond `SharedPreferences`; the intended home is Room.
-2. **Sleep timer and playback speed.**
+1. **Sleep timer and playback speed.**
 
 An equalizer was considered and explicitly declined.
 
