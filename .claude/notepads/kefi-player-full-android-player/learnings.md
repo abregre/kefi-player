@@ -1317,3 +1317,29 @@ smooth bar with zero extra IPC.
   `permission_deny_and_dont_ask_again_button` on the repeat — a script that hardcodes the first
   id silently fails on the second dialog. Also: while a system dialog is up, `tapsel.sh`
   correctly reports the WebView tap as a miss instead of pretending it landed.
+
+## T20 — scripts/qa-playback.sh (2026-08-20)
+- NEW `scripts/qa-playback.sh` (executable, takes a serial, default `emulator-5554`),
+  `package.json` gained `"qa": "bash scripts/qa-playback.sh"`. 29 checks over preflight, T10,
+  the media-button pre-check, T5, T8 and T12; one PASS/FAIL line each; exit 1 on any FAIL.
+- **The suite drives the app through its own JS bridge over the DevTools protocol, not through
+  taps.** The script writes a ~30-line `cdp.mjs` to a temp dir at run time (Node 22's global
+  `WebSocket`; no dependency added) and evaluates e.g. `Capacitor.Plugins.Player.setQueue(...)`
+  inside the live WebView. Rationale: the dev panel T13 deleted was the old tap target, and
+  hardcoded pixel coordinates stop hitting anything the moment a layout changes — while a tap
+  that misses reads exactly like a passing test. `userGesture: true` is set on every evaluate
+  because `PlayerController` only accepts its first touch from a user-gesture-originated call.
+- **`set -u` only — NO `pipefail`.** Nearly every assertion ends in `grep -q`, which exits on
+  first match and SIGPIPEs its feeder; under `pipefail` a SUCCESSFUL match becomes a failed
+  pipeline. This cost a full run: the preflight aborted claiming the app was not installed.
+- Three assertion-mechanics bugs found by running it, all "the test was wrong", not the app:
+  1. **foregroundServiceType is a BITMASK in dumpsys**, never the manifest's word:
+     `isForeground=true foregroundId=1001 types=0x00000002` (0x2 =
+     `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`). Grepping for `mediaPlayback` finds nothing.
+  2. **`dumpsys audio`'s client line reads `u/pid:<uid>/<pid> … state:started`** — a bare
+     `pid:<pid>` also matches unrelated log lines inside the same dump.
+  3. **The renderer kill needs root**: `shell kill -9 <renderer>` gives "Operation not
+     permitted" (the shell user cannot signal another app's isolated process), and the three
+     assertions after it then all passed against a renderer that never died — a false green.
+     Now uses `shell su 0 kill -9` and FAILS LOUDLY, naming `adb root`, when it cannot kill.
+- Result on `emulator-5554` (API 36): **29/29 PASS**.

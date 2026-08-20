@@ -16,7 +16,8 @@
     "icons": "python3 scripts/make-icons.py",
     "fonts": "python3 scripts/fetch-fonts.py",
     "keystore": "bash scripts/make-keystore.sh",
-    "fixtures": "bash scripts/qa-fixtures.sh"
+    "fixtures": "bash scripts/qa-fixtures.sh",
+    "qa": "bash scripts/qa-playback.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

@@ -536,7 +536,7 @@ plan never modifies anything under `/mnt/X/myProjects/ytmp3`.
     and granting populates the list **without an app restart**; with permission granted and
     `$EMU shell rm -r /sdcard/Music/kefi-qa` plus a re-scan, the empty state renders.
 
-- [ ] **T20: `scripts/qa-playback.sh`**
+- [x] **T20: `scripts/qa-playback.sh`**
   - Files: NEW `scripts/qa-playback.sh` (executable); `package.json` (add `"qa": "bash scripts/qa-playback.sh"`).
   - Takes a serial (default `emulator-5554`), runs every scripted assertion from T5, T8, T10,
     T12 and prints one `PASS`/`FAIL` line each, exiting non-zero on any failure. Includes the
