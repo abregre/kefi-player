@@ -63,6 +63,20 @@
   );
 
   /*
+   * Both progress surfaces (the mini-player strip, the Now Playing seek bar) paint this
+   * gradient at FULL width and uncover only the elapsed part, so green means the start of
+   * the track and red means the end of it wherever the bar is — rather than squeezing the
+   * same green-to-red into whatever has played, which looks identical at 5% and at 95%.
+   *
+   * The two-layer background that does the uncovering canNOT live here, and that is worth
+   * knowing: a `var()` inside a custom property is substituted where the property is
+   * DECLARED, not where it is used. A `var(--progress-fill)` written here would resolve
+   * against :root, where that percentage does not exist, and silently freeze at its
+   * fallback — which is exactly what it did on the first attempt. So each surface writes
+   * its own two-layer `background` and only the colours are shared.
+   */
+
+  /*
    * Safe-area insets, so screens can pad without repeating env() everywhere.
    *
    * `--safe-area-inset-*` comes FIRST because it is the only source that is correct on

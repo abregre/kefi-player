@@ -1576,3 +1576,29 @@ wave is for; every scripted signal only ever proved the pipeline reached the mix
 kefi-2/kefi-4.png, the six-colour palette, row artwork, the Folders tab, swipe between
 tabs, the home-screen widget, and the three device-reported fixes) is work beyond the plan,
 committed and covered by `npm run qa` — 38 checks.
+
+## Progress bars: full-width sweep, uncovered by progress (2026-08-20)
+Requested change: the green → yellow → red gradient must always span 100% of the bar and
+only the elapsed part be visible, so the colour says WHERE in the track you are. Previously
+it was SIZED into the elapsed width, which looks identical at 5% and 95%.
+
+Both surfaces now paint two layers, no masks: the FIRST layer (which paints on TOP) is
+`transparent` up to `--progress-fill` and the empty-track colour after it, over the
+full-width `--progress-gradient`. The mini-player lost its inner `.progress-fill` element —
+one element does it now, the same way the seek bar's track pseudo-element does.
+
+**The trap that cost a build: a `var()` inside a custom property is substituted where the
+property is DECLARED, not where it is used.** The first attempt put the whole two-layer
+background in a `--progress-track` token on `:root`; its `var(--progress-fill, 0%)` resolved
+against `:root`, where that percentage does not exist, so it froze at the `0%` fallback and
+every bar rendered completely empty. Confirmed by reading the computed value:
+`linear-gradient(90deg, transparent 0 0%, #e8f1eb 0% 100%)` — the fallback, baked in, while
+the element's own `--progress-fill` was `100%`. Only the COLOURS can live in a shared token;
+anything that has to read a per-element variable must be a normal property on that element.
+(`--progress-gradient` works precisely because everything it reads — `--accent` and friends —
+is also declared on `:root`.)
+
+Verified by pixel-sampling the seek bar at 10% / 50% / 95%: the colour at a given x is
+IDENTICAL at all three positions (x=70 is always (5,109,58), x=220 always (77,139,41)),
+which is the actual proof that the sweep is anchored to the full width rather than squeezed;
+only how far it extends changes. The mini-player strip samples the same way.

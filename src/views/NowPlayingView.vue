@@ -43,9 +43,9 @@ const sliderValue = computed(() => (dragging.value ? dragValue.value : player.di
 /**
  * How much of the seek track is behind the thumb, as a percentage. Fed to the track as a
  * custom property because a range input's fill is not a thing CSS gives you: the track
- * pseudo-element paints the gradient clipped to this width.
+ * pseudo-element uncovers this much of the full-width sweep itself.
  */
-const seekFill = computed(() => {
+const progressFill = computed(() => {
   const total = player.duration.value
   if (!total) return 0
   return Math.min(100, (sliderValue.value / total) * 100)
@@ -115,7 +115,7 @@ function cycleRepeat() {
           :max="player.duration.value || 0"
           step="1000"
           :value="sliderValue"
-          :style="{ '--seek-fill': `${seekFill}%` }"
+          :style="{ '--progress-fill': `${progressFill}%` }"
           :aria-label="t('player.seek')"
           @input="onSeekInput"
           @change="onSeekCommit"
@@ -359,18 +359,23 @@ function cycleRepeat() {
   height: 0.28rem;
   border-radius: 999px;
   /*
-   * Two layers: the shared progress gradient, sized to the elapsed fraction and not
-   * repeated, over the empty-track colour. `--seek-fill` is set on the input itself and
-   * inherits in here — a range input gives no ::fill pseudo-element in Chromium, so the
-   * track has to paint its own.
-   *
-   * Sized rather than clipped, exactly like the mini-player's strip: the whole
-   * green -> yellow -> red sweep is squeezed into however much has played, so both
-   * progress surfaces read as the same object at any position.
+   * A full-width green -> yellow -> red sweep with only the elapsed part uncovered.
+   * `--progress-fill` is set on the input itself and inherits in here — a range input
+   * gives no ::fill pseudo-element in Chromium, so the track paints its own.
+   */
+  /*
+   * Two layers, no masks: the FIRST layer paints on TOP and is transparent up to
+   * `--progress-fill`, then the empty-track colour — so the full-width sweep underneath
+   * shows through exactly as far as playback has got. `--progress-fill` has to be read in
+   * a normal property like this one, not from inside a custom property (see src/style.css).
    */
   background:
-    var(--progress-gradient) 0 0 / var(--seek-fill, 0%) 100% no-repeat,
-    var(--surface-2);
+    linear-gradient(
+        90deg,
+        transparent 0 var(--progress-fill, 0%),
+        var(--surface-2) var(--progress-fill, 0%) 100%
+      ),
+    var(--progress-gradient);
 }
 
 .seek-input::-webkit-slider-thumb {

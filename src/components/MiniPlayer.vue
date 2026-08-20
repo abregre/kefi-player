@@ -53,9 +53,7 @@ function toggle() {
   <!-- Hidden entirely (not merely blank) until something is loaded, so the library
        gets the full height until there is a player to show. -->
   <div v-if="player.mediaId.value" class="mini" :class="{ hidden }" :aria-hidden="hidden">
-    <div class="progress" aria-hidden="true">
-      <div class="progress-fill" :style="{ width: `${progress}%` }" />
-    </div>
+    <div class="progress" :style="{ '--progress-fill': `${progress}%` }" aria-hidden="true" />
     <div class="body">
       <button
         type="button"
@@ -106,17 +104,24 @@ function toggle() {
 }
 
 /* Thin line rather than a full bar: the mini-player is a status strip, and the
-   seekable bar belongs to Now Playing. */
+   seekable bar belongs to Now Playing. One element, no inner fill: `--progress-track`
+   uncovers the elapsed part of a full-width sweep (see src/style.css), which is also
+   exactly what the Now Playing seek bar paints. */
 .progress {
   height: 2px;
-  background: var(--surface-2);
-}
-
-.progress-fill {
-  height: 100%;
-  /* Green -> yellow -> red, the icon's own sweep, so the strip reads as this app's
-     rather than as a generic progress bar. Shared with the Now Playing seek bar. */
-  background: var(--progress-gradient);
+  /*
+   * Two layers, no masks: the FIRST layer paints on TOP and is transparent up to
+   * `--progress-fill`, then the empty-track colour — so the full-width sweep underneath
+   * shows through exactly as far as playback has got. `--progress-fill` has to be read in
+   * a normal property like this one, not from inside a custom property (see src/style.css).
+   */
+  background:
+    linear-gradient(
+        90deg,
+        transparent 0 var(--progress-fill, 0%),
+        var(--surface-2) var(--progress-fill, 0%) 100%
+      ),
+    var(--progress-gradient);
 }
 
 .body {
