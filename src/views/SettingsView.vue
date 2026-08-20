@@ -66,6 +66,22 @@ async function addWidget() {
       <p class="app-name">{{ t('app.name') }}</p>
       <p class="about-body">{{ t('settings.about.body') }}</p>
     </div>
+
+    <!--
+      Text only, deliberately: there is no donation link yet (decided 2026-08-20). When one
+      exists this becomes a button that opens it — which needs a plugin method to hand the
+      url to the system browser, since a Capacitor WebView would otherwise open it inside
+      the app. Until then a dead button would be worse than none.
+    -->
+    <h2 class="section-title">{{ t('settings.support') }}</h2>
+    <div class="card support">
+      <span class="support-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 20.3s-7.5-4.6-7.5-9.4a4.2 4.2 0 0 1 7.5-2.6 4.2 4.2 0 0 1 7.5 2.6c0 4.8-7.5 9.4-7.5 9.4Z" />
+        </svg>
+      </span>
+      <p class="support-body">{{ t('settings.support.body') }}</p>
+    </div>
   </section>
 </template>
 
@@ -141,6 +157,32 @@ async function addWidget() {
 
 .about {
   padding: 0.9rem;
+}
+
+.support {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.support-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.support-icon svg {
+  display: block;
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+.support-body {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
 .app-name {

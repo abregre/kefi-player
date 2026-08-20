@@ -64,6 +64,9 @@ export default {
   'settings.widget.add': 'Add the player widget',
   'settings.widget.manual':
     'This launcher will not add widgets for an app. Add it from the launcher\u2019s own widget list instead: long-press the home screen, tap Widgets, then Kefi Player.',
+  'settings.support': 'Support',
+  'settings.support.body':
+    'Kefi is free, ad-free and works entirely offline. If it has earned a place on your home screen, donations are welcome.',
   'settings.about': 'About',
   'settings.about.body': 'A local music player. No accounts, no network, no database.',
 

@@ -63,6 +63,9 @@ export default {
   'settings.widget.add': 'Προσθήκη widget',
   'settings.widget.manual':
     'Αυτό το launcher δεν προσθέτει widget εκ μέρους της εφαρμογής. Πρόσθεσέ το από τη λίστα widget του launcher: παρατεταμένο πάτημα στην αρχική οθόνη, μετά «Widgets» και «Kefi Player».',
+  'settings.support': 'Υποστήριξη',
+  'settings.support.body':
+    'Το Kefi είναι δωρεάν, χωρίς διαφημίσεις και δουλεύει εντελώς εκτός σύνδεσης. Αν κέρδισε μια θέση στην αρχική σου οθόνη, οι δωρεές είναι ευπρόσδεκτες.',
   'settings.about': 'Σχετικά',
   'settings.about.body': 'Χωρίς λογαριασμούς, χωρίς δίκτυο.',
 
