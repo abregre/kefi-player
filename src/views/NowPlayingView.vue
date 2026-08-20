@@ -384,7 +384,7 @@ function cycleRepeat() {
   height: 0.85rem;
   margin-top: -0.28rem;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--text);
 }
 
 .times {
