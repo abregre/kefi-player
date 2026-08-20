@@ -69,6 +69,10 @@ ffmpeg -y -hide_banner -loglevel error \
   "$LOCAL_DIR/f2.$EXT"
 
 # f3 — Ωδή / Δήμητρα Παπαδοπούλου / Κέφι Vol 2 / 240s / no art
+# In a SUBFOLDER on purpose: the library's Folders grouping needs more than one folder to
+# be worth asserting anything about, and this keeps every other count (3 songs, 3 albums,
+# 2 artists) exactly as it was.
+mkdir -p "$LOCAL_DIR/vol2"
 ffmpeg -y -hide_banner -loglevel error \
   -f lavfi -i "sine=frequency=659:duration=240" \
   -metadata title="Ωδή" \
@@ -77,7 +81,7 @@ ffmpeg -y -hide_banner -loglevel error \
   -metadata track="1" \
   -id3v2_version 3 \
   -codec:a "$AUDIO_CODEC" -b:a 128k \
-  "$LOCAL_DIR/f3.$EXT"
+  "$LOCAL_DIR/vol2/f3.$EXT"
 
 rm -f "$LOCAL_DIR/cover.png"
 
@@ -96,13 +100,18 @@ ls -la "$LOCAL_DIR"
 
 echo
 echo "Verifying Greek tags survived the encode (ffprobe):"
-for f in f1 f3; do
+for f in "f1.$EXT" "vol2/f3.$EXT"; do
   ffprobe -v quiet -show_entries format_tags=title,artist,album \
-    -of default=noprint_wrappers=1 "$LOCAL_DIR/$f.$EXT"
+    -of default=noprint_wrappers=1 "$LOCAL_DIR/$f"
 done
 
-# Push to the device.
-"${ADB[@]}" shell mkdir -p "$REMOTE_DIR"
+# Push to the device. f3 used to live flat in this directory; drop the old copy and scan
+# its path so MediaStore forgets the row, otherwise the library would show the same track
+# twice — once per folder — after an upgrade from an older fixture set.
+"${ADB[@]}" shell mkdir -p "$REMOTE_DIR/vol2"
+"${ADB[@]}" shell rm -f "$REMOTE_DIR/f3.$EXT" >/dev/null 2>&1 || true
+"${ADB[@]}" shell content call --uri content://media --method scan_file \
+  --arg "$REMOTE_DIR/f3.$EXT" >/dev/null 2>&1 || true
 "${ADB[@]}" push "$LOCAL_DIR/." "$REMOTE_DIR/"
 
 # Verification helper: query MediaStore and check the 3 playable fixtures are there with
@@ -140,9 +149,9 @@ SCAN_METHOD=""
 
 echo
 echo "Scan attempt 1: content call scan_file (per file)"
-for f in f1 f2 f3; do
+for f in "f1.$EXT" "f2.$EXT" "vol2/f3.$EXT"; do
   "${ADB[@]}" shell content call --uri content://media --method scan_file \
-    --arg "$REMOTE_DIR/$f.$EXT" >/dev/null 2>&1 || true
+    --arg "$REMOTE_DIR/$f" >/dev/null 2>&1 || true
 done
 for f in autobackup_kefi.mp3 autoplaylist_kefi.mp3; do
   "${ADB[@]}" shell content call --uri content://media --method scan_file \

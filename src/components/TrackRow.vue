@@ -35,7 +35,7 @@ const cover = computed(() => artwork.value[props.track.id] ?? null)
     :data-track-id="props.track.id"
     @click="$emit('select', props.track)"
   >
-    <span class="art">
+    <span class="art" :class="{ 'has-cover': cover }">
       <img v-if="cover" class="art-image" :src="cover" alt="" />
       <span v-else class="art-placeholder" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -119,8 +119,12 @@ const cover = computed(() => artwork.value[props.track.id] ?? null)
   justify-content: center;
   gap: 2px;
   padding-bottom: 0.55rem;
-  /* Scrim, so the bars stay legible over a bright cover as well as over the
-     placeholder. */
+}
+
+/* The scrim is only needed over real artwork, which can be any colour. Over the
+   placeholder it just turned a soft, on-palette tile into a grey blob — and the bars are
+   already accent-on-accent-soft there, which clears 4.5:1 in both themes. */
+.art.has-cover .bars {
   background: rgb(8 10 10 / 55%);
 }
 

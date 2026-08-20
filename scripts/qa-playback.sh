@@ -175,6 +175,21 @@ else
     fail "listTracks returned $LISTED tracks of which $LISTED_JUNK are unplayable (expected 3 and 0)"
 fi
 
+# The fixtures live in two directories (f3 sits in vol2/), which is what makes the
+# library's Folders grouping testable at all — and it exercises the `folder` field the
+# native TrackSource added for it.
+FOLDERS=$(node -e '
+  const { tracks } = JSON.parse(process.argv[1])
+  const unique = [...new Set(tracks.map((t) => t.folder))].sort()
+  console.log(JSON.stringify(unique))
+' "$TRACKS")
+FOLDER_COUNT=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$FOLDERS")
+if [[ "$FOLDER_COUNT" == 2 && "$FOLDERS" == *"kefi-qa/vol2"* ]]; then
+  pass "listTracks reports the fixtures in 2 folders ($FOLDERS)"
+else
+  fail "listTracks reports $FOLDER_COUNT folder(s): $FOLDERS (expected 2, one of them kefi-qa/vol2)"
+fi
+
 URIS=$(node -e '
   const wanted = ["Άσπρη Μέρα", "Zeibekiko", "Ωδή"]
   const { tracks } = JSON.parse(process.argv[1])

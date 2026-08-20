@@ -433,5 +433,6 @@ class PlayerPlugin : Plugin() {
         put("year", year ?: JSONObject.NULL)
         put("durationMs", durationMs)
         put("size", size)
+        put("folder", folder)
     }
 }

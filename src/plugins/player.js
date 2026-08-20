@@ -27,6 +27,9 @@ import { registerPlugin } from '@capacitor/core'
  * @property {number | null} year
  * @property {number} durationMs
  * @property {number} size
+ * @property {string} folder Containing directory as the user would recognise it
+ *   (`Music/kefi-qa`), with no leading or trailing slash. Drives the library's Folders
+ *   grouping; empty string when MediaStore reports no path.
  */
 
 /**

@@ -1478,3 +1478,41 @@ green/yellow come through automatically (verified by pixel-sampling both themes)
   `background-image: none` for a track that was painting correctly. Verified by sampling the
   screenshot's pixels along the track instead: at 50% the filled half reads green
   (21,115,55) → yellow (228,202,6) → red (246,58,38) and the rest is the empty-track colour.
+
+## Folders tab + swipe between tabs (2026-08-20)
+- **`TrackSource.Track` gained `folder`** — additive to the T9 contract, so nothing that
+  ignores it breaks. Read from `RELATIVE_PATH` on API 29+ and from the deprecated `_data`
+  path below it (minSdk is 24), normalised by `folderOf()` to the same shape either way:
+  no leading/trailing slash, storage prefix (`/storage/emulated/0/`, `/sdcard/`) stripped
+  because it is identical on every row and only makes the UI wider. Serialised in
+  `PlayerPlugin.Track.toJSObject`, typed in `player.js`, mocked in `player.web.js`.
+- `useLibrary.folders` is just `groupBy('folder', '')` — the grouping helper T16 wrote took
+  a field name, so a third grouping cost one line.
+- NEW `src/components/FolderList.vue`: folders expand IN PLACE (accordion) rather than
+  pushing a screen. A drill-down would have made the hardware back button ambiguous — "close
+  this folder" vs "leave the library" — for no gain. Expanded keys live at module level, so
+  going to Now Playing and back does not collapse what the user opened. Playing a track from
+  a folder queues THAT FOLDER (verified: `queueLength 2` from the 2-track folder, not 3).
+- **The segmented control now scrolls horizontally.** Four Greek labels do not fit on a
+  360px screen at any font scale worth supporting, so segments are `flex: 0 0 auto` with the
+  scrollbar hidden, and the newly selected tab is `scrollIntoView({ inline: 'center' })`-ed
+  after a swipe — otherwise the swipe would select a tab that is off screen.
+- NEW `src/composables/useHorizontalSwipe.js`: passive listeners, never `preventDefault`.
+  The gesture shares its surface with a vertically scrolling list, and stealing touch events
+  to save an animation would make that list feel broken. Direction is decided at `touchend`
+  (≥56px, horizontal at least 1.6× vertical, under 700ms), and an `ignore` selector keeps the
+  search field and the tab strip — which do their own horizontal dragging — out of it.
+  No wrap-around at the ends: a segmented control has ends.
+- **The bug this shipped with, found by testing rather than by looking:** the swipe did
+  nothing at all, and `adb shell input swipe` produced ZERO touch events on `.page`. Cause:
+  `.page` is only as tall as its content, so a flick in the empty area below a short list
+  landed on the parent. `min-height: 100%` on `.page` fixed it. Worth remembering — a
+  gesture attached to a content-sized element silently covers less than the screen.
+- Also fixed while verifying: the "now playing" bars' scrim turned the artwork PLACEHOLDER
+  into a grey blob (it was only ever needed over real, arbitrarily-coloured artwork). Scoped
+  to `.art.has-cover .bars`; over the placeholder the accent bars already clear 4.5:1.
+- QA: the fixtures now live in two directories (`f3` moved to `kefi-qa/vol2/`, with the old
+  flat path removed and re-scanned so MediaStore drops the stale row), which keeps every
+  existing count identical (3 songs, 3 albums, 2 artists) while making the grouping testable.
+  `npm run qa` asserts `listTracks` reports exactly 2 folders including `kefi-qa/vol2`
+  — 37 checks, all green, plus the full UI sweep.

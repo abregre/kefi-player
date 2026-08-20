@@ -182,6 +182,12 @@ function groupBy(field, fallbackKey) {
 
 const albums = computed(() => groupBy('album', ''))
 /**
+ * By containing directory. The one grouping that is not about tags at all: it is how the
+ * files were actually put on the device, which is the only view that still works for a
+ * library with no metadata worth speaking of.
+ */
+const folders = computed(() => groupBy('folder', ''))
+/**
  * Lookup from a content uri to the full track record. The player's snapshot carries a
  * uri (and only a title/artist), but artwork needs the MediaStore `id` and the mini-
  * player wants the album name — both of which the library already knows.
@@ -251,6 +257,7 @@ export function useLibrary() {
     openAppSettings: () => Player.openAppSettings(),
     albums,
     artists,
+    folders,
     trackByUri,
     artwork: readonly(artwork),
     loadArtwork,

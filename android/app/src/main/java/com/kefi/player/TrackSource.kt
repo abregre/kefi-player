@@ -40,6 +40,12 @@ object TrackSource {
         val year: Int?,
         val durationMs: Long,
         val size: Long,
+        /**
+         * The track's containing directory, as a path the user would recognise
+         * (`Music/kefi-qa`, `Download`). Added for the library's Folders grouping —
+         * additive to the T9 contract, so nothing that ignores it breaks.
+         */
+        val folder: String,
     )
 
     /** In-memory only, at most 64 entries — an explicit Must NOT Have forbids anything durable. */
@@ -55,6 +61,40 @@ object TrackSource {
     /** MediaStore's placeholder for an untagged artist/album; showing it verbatim is worse
      *  than showing nothing, because the UI already has its own "unknown" strings. */
     private const val UNKNOWN = "<unknown>"
+
+    /**
+     * `RELATIVE_PATH` ("Music/kefi-qa/") is the modern, volume-independent answer and the
+     * only one scoped storage really wants you to use. It does not exist before API 29, and
+     * minSdk here is 24, so the legacy branch reads the absolute `_data` path instead — the
+     * two are normalised to the same shape by [folderOf].
+     */
+    private fun folderColumn(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.RELATIVE_PATH
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Audio.Media.DATA
+        }
+
+    /**
+     * Normalises whichever column [folderColumn] picked into a displayable directory path
+     * with no leading or trailing slash. On API 29+ the value is already the directory
+     * (`Music/kefi-qa/`); below that it is a full file path, so the file name comes off and
+     * the storage prefix (`/storage/emulated/0/`, `/sdcard/`) is trimmed — it is the same
+     * for every row and only makes the UI wider.
+     */
+    private fun folderOf(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val withoutFile = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            raw
+        } else {
+            raw.substringBeforeLast('/', "")
+        }
+        return withoutFile
+            .removePrefix("/storage/emulated/0/")
+            .removePrefix("/sdcard/")
+            .trim('/')
+    }
 
     private fun audioCollection(): Uri =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -77,6 +117,7 @@ object TrackSource {
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.SIZE,
+            folderColumn(),
         )
         // `IS_MUSIC = 1` is necessary but nowhere near sufficient. Android's media scanner
         // indexes by FILE EXTENSION, so anything an app happens to name `*.mp3` — a backup
@@ -117,6 +158,7 @@ object TrackSource {
                 val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
                 val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val folderCol = cursor.getColumnIndexOrThrow(folderColumn())
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
@@ -136,6 +178,7 @@ object TrackSource {
                             year = if (cursor.isNull(yearCol)) null else cursor.getInt(yearCol),
                             durationMs = cursor.getLong(durationCol),
                             size = cursor.getLong(sizeCol),
+                            folder = folderOf(cursor.getString(folderCol)),
                         )
                     )
                 }

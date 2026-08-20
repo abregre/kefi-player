@@ -128,6 +128,7 @@ export class PlayerWeb extends WebPlugin {
           year: null,
           durationMs: 180000,
           size: 2_880_000,
+          folder: 'Music/kefi-qa',
         },
         {
           id: 2,
@@ -140,6 +141,7 @@ export class PlayerWeb extends WebPlugin {
           year: null,
           durationMs: 210000,
           size: 3_360_000,
+          folder: 'Music/kefi-qa',
         },
         {
           id: 3,
@@ -152,6 +154,7 @@ export class PlayerWeb extends WebPlugin {
           year: null,
           durationMs: 240000,
           size: 3_840_000,
+          folder: 'Music/kefi-qa/vol2',
         },
       ],
     }

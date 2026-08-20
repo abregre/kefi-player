@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
@@ -7,6 +7,8 @@ import { useLazyArtwork } from '../composables/useLazyArtwork'
 import TrackRow from '../components/TrackRow.vue'
 import AlbumGrid from '../components/AlbumGrid.vue'
 import ArtistList from '../components/ArtistList.vue'
+import FolderList from '../components/FolderList.vue'
+import { useHorizontalSwipe } from '../composables/useHorizontalSwipe'
 
 const { t } = useI18n()
 const {
@@ -17,6 +19,7 @@ const {
   visibleTracks,
   albums,
   artists,
+  folders,
   initialize,
   reload,
   requestPermission,
@@ -24,8 +27,37 @@ const {
 } = useLibrary()
 const player = usePlayer()
 
-const TABS = ['songs', 'albums', 'artists']
+const TABS = ['songs', 'albums', 'artists', 'folders']
 const tab = ref('songs')
+
+const page = ref(null)
+const segmented = ref(null)
+
+/**
+ * Swiping the page moves one tab, the way the segmented control reads left to right. No
+ * wrap-around: a segmented control has ends, and silently jumping from Folders back to
+ * Songs would lose the user's place in a list they can see.
+ * @param {'left' | 'right'} direction
+ */
+function stepTab(direction) {
+  const index = TABS.indexOf(tab.value)
+  const next = direction === 'left' ? index + 1 : index - 1
+  if (next < 0 || next >= TABS.length) return
+  tab.value = TABS[next]
+}
+
+// The search field and the tab strip do their own horizontal dragging (caret, scroll).
+useHorizontalSwipe(page, { onSwipe: stepTab, ignore: '.segmented, .search' })
+
+// Four tabs no longer fit on a narrow screen, so the strip scrolls — which means the tab
+// a swipe just selected can be off screen. Bring it back into view.
+watch(tab, () => {
+  nextTick(() => {
+    segmented.value
+      ?.querySelector('.segment.selected')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' })
+  })
+})
 
 /*
  * Song rows show their own cover, so the list needs the same lazy loader the album grid
@@ -54,6 +86,10 @@ const empty = computed(() => status.value === 'ready' && tracks.value.length ===
 const countLabel = computed(() => {
   if (tab.value === 'albums') return t('library.count.albums', { count: albums.value.length })
   if (tab.value === 'artists') return t('library.count.artists', { count: artists.value.length })
+  if (tab.value === 'folders') {
+    const count = folders.value.length
+    return count === 1 ? t('library.count.folder') : t('library.count.folders', { count })
+  }
   const count = visibleTracks.value.length
   return count === 1 ? t('library.count.song') : t('library.count.songs', { count })
 })
@@ -64,10 +100,14 @@ const countLabel = computed(() => {
  * happens to be third in the unfiltered library.
  * @param {import('../plugins/player').PlayerTrack} track
  */
-function playFrom(track) {
-  const list = visibleTracks.value
+function playFromList(list, track) {
   const startIndex = list.findIndex((candidate) => candidate.id === track.id)
   player.setQueue({ uris: list.map((item) => item.uri), startIndex: Math.max(0, startIndex) })
+}
+
+/** @param {import('../plugins/player').PlayerTrack} track */
+function playFrom(track) {
+  playFromList(visibleTracks.value, track)
 }
 
 /**
@@ -82,7 +122,7 @@ function playGroup(group) {
 </script>
 
 <template>
-  <section class="page">
+  <section ref="page" class="page">
     <header class="head">
       <h1 class="page-title">{{ t('library.title') }}</h1>
       <p v-if="!canAsk && !blocked && !empty" class="count">{{ countLabel }}</p>
@@ -134,7 +174,7 @@ function playGroup(group) {
         />
       </div>
 
-      <div class="segmented" role="tablist" :aria-label="t('library.title')">
+      <div ref="segmented" class="segmented" role="tablist" :aria-label="t('library.title')">
         <button
           v-for="name in TABS"
           :key="name"
@@ -163,7 +203,14 @@ function playGroup(group) {
           </li>
         </ul>
         <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
-        <ArtistList v-else :artists="artists" @select="playGroup" />
+        <ArtistList v-else-if="tab === 'artists'" :artists="artists" @select="playGroup" />
+        <FolderList
+          v-else
+          :folders="folders"
+          :current-uri="player.uri.value"
+          :playing="player.isPlaying.value"
+          @select="({ track, tracks }) => playFromList(tracks, track)"
+        />
       </template>
 
       <div v-if="status === 'ready' && visibleTracks.length === 0 && query" class="notice">
@@ -177,6 +224,10 @@ function playGroup(group) {
 <style scoped>
 .page {
   padding: calc(var(--safe-top) + 1.1rem) 1rem 1rem;
+  /* Fills the scroll area even when the list is short: the swipe listener lives on this
+     element, and without the min-height a flick anywhere below the last row would land on
+     the empty parent and do nothing — which is exactly how it behaved when first tried. */
+  min-height: 100%;
 }
 
 .head {
@@ -246,6 +297,9 @@ function playGroup(group) {
   appearance: none;
 }
 
+/* Four tabs of Greek do not fit on a 360px screen at any font scale worth supporting, so
+   the strip scrolls instead of squeezing. The scrollbar is hidden because the overflowing
+   segment is its own affordance, and swiping the page switches tabs anyway. */
 .segmented {
   display: flex;
   gap: 0.3rem;
@@ -254,16 +308,24 @@ function playGroup(group) {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 999px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.segmented::-webkit-scrollbar {
+  display: none;
 }
 
 .segment {
-  flex: 1;
-  padding: 0.4rem 0.2rem;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.75rem;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
   font-size: 0.8rem;
+  white-space: nowrap;
 }
 
 .segment.selected {

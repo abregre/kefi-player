@@ -17,7 +17,8 @@ project `../ytmp3` is TypeScript, this one is not.
 - **Reads the whole device library with no database.** One `MediaStore.Audio` query
   on demand — no Room, no SQLite, no cache table, no `ContentObserver`. Artwork is
   fetched per track, lazily, as a base64 JPEG.
-- **Library in three groupings** — Songs, Albums, Artists — with in-memory search.
+- **Library in four groupings** — Songs, Albums, Artists, Folders — with in-memory
+  search, switched by tapping a tab or swiping the page sideways.
   Every sort and every search compare goes through `Intl.Collator('el', { sensitivity:
   'base' })`, so `ωδη` finds `Ωδή` and Greek sorts the way a Greek speaker expects.
 - **A mini-player that never remounts** (it lives outside `<RouterView>`) and a full
@@ -79,8 +80,8 @@ The Library screen renders three distinct states rather than a blank list:
 ## QA
 
 ```bash
-npm run fixtures          # push + index 3 audio fixtures, plus 2 unplayable baits (needs ffmpeg)
-npm run qa                # 36 scripted checks; exits non-zero on any FAIL
+npm run fixtures          # push + index 3 audio fixtures (in 2 folders) + 2 unplayable baits
+npm run qa                # 37 scripted checks; exits non-zero on any FAIL
 bash scripts/qa-playback.sh 1a2b3c4d   # ...against a specific adb serial
 ```
 
