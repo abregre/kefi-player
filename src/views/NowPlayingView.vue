@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
+import { useVerticalDismiss } from '../composables/useVerticalDismiss'
 import { formatMs } from '../utils/format'
 
 const router = useRouter()
@@ -76,10 +77,34 @@ function toggle() {
 function cycleRepeat() {
   player.setRepeatMode(REPEAT_CYCLE[player.repeatMode.value] ?? 'all')
 }
+
+const page = ref(null)
+
+/*
+ * The back button at line 84 stays the primary way to leave this screen; this is an
+ * additional path to the same `router.back()`, not a replacement. `offset` and
+ * `sheetDragging` are presentation-only (how far the sheet currently sits below its rest
+ * position, and whether it is being dragged right now) and live in the composable, not
+ * here — nothing about this gesture becomes a second source of playback truth. Renamed
+ * at the destructure (the composable's own `dragging` return stays as-is) because the
+ * seek bar above already owns the identifier `dragging` for its own, unrelated drag
+ * state — the two never read or write each other. Since the view is unmounted on every
+ * navigation away from it (the MiniPlayer, not this component, stays alive), a fresh
+ * mount always gets a fresh ref at 0 — there is no stale offset to reset explicitly.
+ */
+const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
+  onDismiss: () => router.back(),
+  ignore: '.seek-input, .icon-button, .play',
+})
 </script>
 
 <template>
-  <section class="page">
+  <section
+    ref="page"
+    class="page"
+    :class="{ dragging: sheetDragging }"
+    :style="{ transform: offset ? `translateY(${offset}px)` : undefined }"
+  >
     <header class="bar">
       <button type="button" class="icon-button" @click="router.back()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
@@ -212,6 +237,22 @@ function cycleRepeat() {
   gap: 1rem;
   padding: calc(var(--safe-top) + 0.6rem) 1.25rem 1.25rem;
   min-height: 100%;
+  /* Settles back to translateY(0) after a drag that didn't cross the dismiss threshold.
+     No transition while the finger is still down (below) — otherwise the sheet lags
+     behind the touch instead of following it. */
+  transition: transform 0.2s ease-out;
+}
+
+.page.dragging {
+  transition: none;
+}
+
+/* Vestibular disorders are a real accessibility need, and this settle animation is
+   decoration: the drag itself already communicated the state change. */
+@media (prefers-reduced-motion: reduce) {
+  .page {
+    transition: none;
+  }
 }
 
 .bar {

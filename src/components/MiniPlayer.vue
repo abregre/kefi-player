@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
@@ -37,11 +37,43 @@ const cover = computed(() => (track.value ? artwork.value[track.value.id] : null
 const title = computed(() => player.title.value || track.value?.title || t('nowPlaying.unknownTitle'))
 const artist = computed(() => player.artist.value || track.value?.artist || t('nowPlaying.unknownArtist'))
 
+/*
+ * Drag state for the touch seek strip, the same shape NowPlayingView uses for its own
+ * seek bar: `player.displayPosition` only ticks locally every 250ms (usePlayer.js), so
+ * a fill bound straight to it would fight a dragging finger. `dragValue` holds the
+ * finger's position until the drag commits; nothing else on this strip needs local state.
+ */
+const dragging = ref(false)
+const dragValue = ref(0)
+
+// If Now Playing opens mid-drag, the strip is hidden by CSS but stays mounted (see
+// `hidden` above), so the `change` event that would normally clear `dragging` never
+// fires. Without this watch the strip would come back from Now Playing wedged on the
+// finger's last position instead of resuming the live ticker.
+watch(hidden, (value) => {
+  if (value) dragging.value = false
+})
+
+const sliderValue = computed(() => (dragging.value ? dragValue.value : player.displayPosition.value))
+
 const progress = computed(() => {
   const total = player.duration.value
   if (!total) return 0
-  return Math.min(100, (player.displayPosition.value / total) * 100)
+  return Math.min(100, (sliderValue.value / total) * 100)
 })
+
+/** @param {Event} event */
+function onSeekInput(event) {
+  dragging.value = true
+  dragValue.value = Number(event.target.value)
+}
+
+/** @param {Event} event */
+function onSeekCommit(event) {
+  const positionMs = Number(event.target.value)
+  dragging.value = false
+  player.seek(positionMs)
+}
 
 function toggle() {
   if (player.isPlaying.value) player.pause()
@@ -53,7 +85,20 @@ function toggle() {
   <!-- Hidden entirely (not merely blank) until something is loaded, so the library
        gets the full height until there is a player to show. -->
   <div v-if="player.mediaId.value" class="mini" :class="{ hidden }" :aria-hidden="hidden">
-    <div class="progress" :style="{ '--progress-fill': `${progress}%` }" aria-hidden="true" />
+    <div class="progress-wrap">
+      <div class="progress" :style="{ '--progress-fill': `${progress}%` }" />
+      <input
+        class="seek-input"
+        type="range"
+        min="0"
+        :max="player.duration.value || 0"
+        step="1000"
+        :value="sliderValue"
+        :aria-label="t('player.seek')"
+        @input="onSeekInput"
+        @change="onSeekCommit"
+      />
+    </div>
     <div class="body">
       <button
         type="button"
@@ -77,6 +122,17 @@ function toggle() {
       </button>
       <button
         type="button"
+        class="side"
+        :aria-label="t('player.previous')"
+        @click="player.previous()"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <rect x="5" y="5.5" width="2.6" height="13" rx="1" />
+          <path d="M19 6.6v10.8c0 .9-1 1.4-1.7 1L9 13c-.7-.4-.7-1.4 0-1.8l8.3-5.5c.7-.5 1.7 0 1.7.9Z" />
+        </svg>
+      </button>
+      <button
+        type="button"
         class="toggle"
         :aria-label="player.isPlaying.value ? t('player.pause') : t('player.play')"
         @click="toggle"
@@ -87,6 +143,17 @@ function toggle() {
         </svg>
         <svg v-else viewBox="0 0 24 24" fill="currentColor">
           <path d="M8 5.2c0-.9 1-1.5 1.8-1L19 11c.7.4.7 1.5 0 1.9L9.8 19.8c-.8.5-1.8-.1-1.8-1V5.2Z" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="side"
+        :aria-label="t('player.next')"
+        @click="player.next()"
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M5 6.6v10.8c0 .9 1 1.4 1.7 1L15 13c.7-.4.7-1.4 0-1.8L6.7 5.7C6 5.2 5 5.7 5 6.6Z" />
+          <rect x="16.4" y="5.5" width="2.6" height="13" rx="1" />
         </svg>
       </button>
     </div>
@@ -101,6 +168,14 @@ function toggle() {
 
 .mini.hidden {
   display: none;
+}
+
+/* The wrapper's height is exactly the visible line's height (2px): the touchable area
+   added below is absolutely positioned over it rather than sized into normal flow, so a
+   taller hit target never grows the strip or pushes `.body` down. */
+.progress-wrap {
+  position: relative;
+  height: 2px;
 }
 
 /* Thin line rather than a full bar: the mini-player is a status strip, and the
@@ -122,6 +197,45 @@ function toggle() {
         var(--surface-2) var(--progress-fill, 0%) 100%
       ),
     var(--progress-gradient);
+}
+
+/*
+ * The seek control: a real `<input type="range">` so dragging/committing reuses the
+ * browser's own touch handling (same idiom as NowPlayingView's `.seek-input`), sized
+ * past the 2px visible line because a finger cannot reliably land on a 2px target.
+ * Anchored to the TOP of `.progress-wrap` and grown downward only — never centred on
+ * the line — because `.mini` sits in a CSS grid row (App.vue) that does not clip its
+ * children: a hit area straddling the strip's top edge would overlay the bottom of the
+ * scrolling list above it and steal taps meant for the last visible row. Growing
+ * downward instead lands entirely inside the strip's own top padding on `.body`
+ * (0.45rem), which is safe to cover because nothing sits there to be tapped.
+ */
+.seek-input {
+  appearance: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 0.6rem;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* The visible line is `.progress` underneath; the input's own track paints nothing. */
+.seek-input::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+
+/* No handle, by request: hidden rather than merely small, since even a tiny thumb is
+   still a thumb. `-webkit` is the only engine this ships in — an Android WebView is
+   Chromium. */
+.seek-input::-webkit-slider-thumb {
+  appearance: none;
+  width: 0;
+  height: 0;
+  background: transparent;
 }
 
 .body {
@@ -240,5 +354,25 @@ function toggle() {
 .toggle svg {
   width: 1.4rem;
   height: 1.4rem;
+}
+
+/* Secondary controls flanking the primary play button: transparent background and a
+   muted colour rather than the accent fill, so `.toggle` stays the one thing the eye
+   lands on first — the same secondary-button idiom as NowPlayingView's `.icon-button`. */
+.side {
+  flex-shrink: 0;
+  width: 2.4rem;
+  height: 2.4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.side svg {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 </style>

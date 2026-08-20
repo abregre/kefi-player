@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from '../i18n'
 import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
@@ -95,6 +95,53 @@ const countLabel = computed(() => {
 })
 
 /**
+ * A forced MediaStore query on a library this size comes back in well under a second,
+ * so the raw `status === 'loading'` window is too short for the spin to read as motion —
+ * the class would flip on and off inside a frame, which looked like the button was dead
+ * on a real device. One full turn at the existing `scan-spin` keyframe timing (0.9s) is
+ * the shortest floor that still reads as a deliberate response rather than a glitch.
+ */
+const MIN_SPIN_MS = 900
+
+/** True from the moment the button is tapped until BOTH the query and the minimum spin
+ * window are done — independent of `status`, so a query that resolves early cannot cut
+ * the spin short. */
+const scanning = ref(false)
+/** Single source of truth for both `:disabled` and `.spinning`: the query is genuinely
+ * still running, or the minimum spin window has not elapsed. Combining them here means
+ * the two can never disagree, and a second tap mid-spin is a no-op either way. */
+const scanBusy = computed(() => status.value === 'loading' || scanning.value)
+
+let spinTimer = null
+
+/** @param {number} ms */
+function wait(ms) {
+  return new Promise((resolve) => {
+    spinTimer = setTimeout(resolve, ms)
+  })
+}
+
+/**
+ * `reload()` itself never rejects — `useLibrary`'s `load()` catches its own errors and
+ * routes them into `status` ('error' | 'denied') instead of throwing — but the `finally`
+ * is what actually matters here: whichever way the query ends, the minimum spin window
+ * must not be stranded open or cut short by it.
+ */
+async function scan() {
+  scanning.value = true
+  try {
+    await Promise.all([reload(), wait(MIN_SPIN_MS)])
+  } finally {
+    scanning.value = false
+    spinTimer = null
+  }
+}
+
+onUnmounted(() => {
+  if (spinTimer) clearTimeout(spinTimer)
+})
+
+/**
  * The queue is the list the user is LOOKING at, not the whole library: playing the
  * third search hit should then continue with the fourth hit, not with whatever
  * happens to be third in the unfiltered library.
@@ -125,7 +172,30 @@ function playGroup(group) {
   <section ref="page" class="page">
     <header class="head">
       <h1 class="page-title">{{ t('library.title') }}</h1>
-      <p v-if="!canAsk && !blocked && !empty" class="count">{{ countLabel }}</p>
+      <!-- Same visibility as the count: while a permission state owns the screen there is
+           nothing to rescan yet. Shown through the empty state on purpose — a finished
+           download that MediaStore already has is exactly the case with nothing to count. -->
+      <div v-if="!canAsk && !blocked" class="head-actions">
+        <!-- Downloads land in MediaStore from outside this screen, so there is no local
+             event to react to; re-running the same listTracks() query on demand is the
+             only way a finished download can appear without restarting the app. -->
+        <button
+          type="button"
+          class="scan-button"
+          :class="{ spinning: scanBusy }"
+          :disabled="scanBusy"
+          :aria-label="t('library.scan')"
+          @click="scan()"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <path d="M23 4v6h-6" />
+            <path d="M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+            <path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+        <p v-if="!empty" class="count">{{ countLabel }}</p>
+      </div>
     </header>
 
     <!-- Permission has never been refused for good: offer to ask. -->
@@ -232,7 +302,9 @@ function playGroup(group) {
 
 .head {
   display: flex;
-  align-items: baseline;
+  /* Was `baseline`: fine for two lines of text, but the scan button is a circle with no
+     text baseline of its own, so the row is centered now that it can hold one. */
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.8rem;
@@ -244,11 +316,62 @@ function playGroup(group) {
   margin: 0;
 }
 
+.head-actions {
+  display: flex;
+  align-items: center;
+}
+
 .count {
   margin: 0;
+  /* Not allowed to shrink: when the header gets tight, the title (which can wrap) is
+     the one that gives, never this line or the button next to it. */
+  flex-shrink: 0;
   font-size: 0.76rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+/* Sized to MiniPlayer's `.toggle` (2.6rem / 1.4rem svg) — the app's one existing round
+   icon-button idiom — rather than the smaller `.icon-button` seen elsewhere, so this is
+   not a second, smaller tap target competing with the established one. */
+.scan-button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.3rem;
+  height: 2.3rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.scan-button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.scan-button:disabled {
+  opacity: 0.6;
+}
+
+.scan-button.spinning svg {
+  animation: scan-spin 0.9s linear infinite;
+}
+
+@keyframes scan-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Same accessibility carve-out MiniPlayer's disc spin makes: the disabled state already
+   says "working", the rotation is decoration on top of it. */
+@media (prefers-reduced-motion: reduce) {
+  .scan-button.spinning svg {
+    animation: none;
+  }
 }
 
 .search {
