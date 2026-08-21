@@ -6,6 +6,62 @@ apply plugin: 'org.jetbrains.kotlin.android'
 // needs no separately-versioned artifact to match against Kotlin.
 apply plugin: 'org.jetbrains.kotlin.kapt'
 
+// Android does not read package.json for its version.  Derive both Android
+// values from the checked-out Git history instead:
+//
+//   v1.2.3 tag at HEAD  -> versionName 1.2.3
+//   commits after it    -> versionName 1.2.3-dev.4+gabcdef0
+//   no SemVer tag yet   -> versionName 0.0.0-dev.<commit-count>+gabcdef0
+//
+// A commit count is monotonically increasing along the release branch, which
+// makes it a suitable Android versionCode.  Release builds are deliberately
+// restricted to an exact vMAJOR.MINOR.PATCH tag: an APK meant for distribution
+// therefore always has a stable, traceable version name.
+def gitOutput = { List<String> arguments ->
+    def stdout = new ByteArrayOutputStream()
+    try {
+        def result = rootProject.exec {
+            workingDir rootProject.rootDir.parentFile
+            commandLine(['git'] + arguments)
+            standardOutput = stdout
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        return result.exitValue == 0 ? stdout.toString('UTF-8').trim() : null
+    } catch (Exception ignored) {
+        return null
+    }
+}
+
+def gitCommitCount = gitOutput(['rev-list', '--count', 'HEAD'])
+def androidVersionCode = (gitCommitCount?.isInteger() ? gitCommitCount.toInteger() : 1)
+def gitDescription = gitOutput(['describe', '--tags', '--match', 'v[0-9]*', '--long', '--dirty', '--always'])
+def gitTag = gitOutput(['describe', '--tags', '--match', 'v[0-9]*', '--exact-match'])
+def releaseTagMatcher = (gitTag ?: '') =~ /^v(\d+\.\d+\.\d+)$/
+def isExactReleaseTag = releaseTagMatcher.matches()
+def isReleaseTask = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+
+def androidVersionName
+if (isExactReleaseTag) {
+    androidVersionName = releaseTagMatcher[0][1]
+} else {
+    def descriptionMatcher = (gitDescription ?: '') =~ /^v(\d+\.\d+\.\d+)-(\d+)-g([0-9a-f]+)(-dirty)?$/
+    if (descriptionMatcher.matches()) {
+        def dirtySuffix = descriptionMatcher[0][4] ? '.dirty' : ''
+        androidVersionName = "${descriptionMatcher[0][1]}-dev.${descriptionMatcher[0][2]}+g${descriptionMatcher[0][3]}${dirtySuffix}"
+    } else {
+        def gitHash = gitOutput(['rev-parse', '--short', 'HEAD']) ?: 'unknown'
+        androidVersionName = "0.0.0-dev.${androidVersionCode}+g${gitHash}"
+    }
+}
+
+if (isReleaseTask && !isExactReleaseTag) {
+    throw new GradleException(
+        'Release builds must be made from an exact annotated or lightweight Git tag named vMAJOR.MINOR.PATCH.\n' +
+        'For example: git tag -a v1.0.0 -m "Kefi Player 1.0.0"\n'
+    )
+}
+
 android {
     namespace = "com.kefi.player"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -13,8 +69,8 @@ android {
         applicationId "com.kefi.player"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode androidVersionCode
+        versionName androidVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // scripts/build-apk.sh passes -PabiFilters=<comma-separated list> to restrict native

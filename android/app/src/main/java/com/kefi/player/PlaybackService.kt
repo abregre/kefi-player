@@ -38,6 +38,17 @@ class PlaybackService : MediaSessionService() {
     private var player: ExoPlayer? = null
     private var session: MediaSession? = null
 
+    /**
+     * Android insert effects bind to one audio session, not to ExoPlayer permanently. The player
+     * can replace that session underneath us, so the effects manager must be told about each new
+     * id rather than leaving an equalizer/booster attached to a stale output.
+     */
+    private val audioSessionListener = object : androidx.media3.common.Player.Listener {
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            AudioEffectsManager.attach(applicationContext, audioSessionId)
+        }
+    }
+
     // T12: guards the interaction between the OS's null-intent auto-restart (see
     // onStartCommand below) and the async restore kicked off at the end of onCreate() — a
     // naive "stop if intent == null && queue is empty" check would race a restore that is
@@ -64,6 +75,8 @@ class PlaybackService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
         player = exoPlayer
+        exoPlayer.addListener(audioSessionListener)
+        AudioEffectsManager.attach(applicationContext, exoPlayer.audioSessionId)
 
         val mediaSession = MediaSession.Builder(this, exoPlayer).build()
         session = mediaSession
@@ -205,6 +218,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        player?.removeListener(audioSessionListener)
+        AudioEffectsManager.detach()
         session?.let { removeSession(it) }
         player?.release()
         player = null

@@ -3,8 +3,13 @@ import { ref } from 'vue'
 import { LOCALES, useI18n } from '../i18n'
 import { Player } from '../plugins/player'
 import { registerTap } from '../composables/useEasterEgg'
+import { useRouter } from 'vue-router'
+import { useSoundSettings } from '../composables/useSoundSettings'
 
 const { locale, t, setLocale } = useI18n()
+const router = useRouter()
+const { sound, load: loadSound } = useSoundSettings()
+loadSound()
 
 /*
  * An app cannot place its own widget; it can only ASK the launcher to
@@ -47,6 +52,12 @@ async function addWidget() {
           </svg>
         </span>
       </button>
+    </div>
+
+    <h2 class="section-title">{{ t('sound.title') }}</h2>
+    <div class="card">
+      <button type="button" class="option" @click="router.push('/settings/equalizer')"><span>{{ t('sound.equalizer') }}</span><span class="summary">{{ sound?.equalizer?.enabled ? t('sound.on') : t('sound.off') }} ›</span></button>
+      <button type="button" class="option" @click="router.push('/settings/volume-booster')"><span>{{ t('sound.booster') }}</span><span class="summary">{{ sound?.volumeBooster?.enabled ? t('sound.on') : t('sound.off') }} ›</span></button>
     </div>
 
     <h2 class="section-title">{{ t('settings.widget') }}</h2>
@@ -155,6 +166,7 @@ async function addWidget() {
   line-height: 1.45;
   color: var(--text-muted);
 }
+.summary { color: var(--text-muted); font-size: .82rem; }
 
 .about {
   padding: 0.9rem;
