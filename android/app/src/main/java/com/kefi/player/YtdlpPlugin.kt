@@ -16,6 +16,8 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.HttpURLConnection
@@ -23,6 +25,7 @@ import java.net.URL
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 @CapacitorPlugin(name = "Ytdlp")
 class YtdlpPlugin : Plugin() {
@@ -106,6 +109,11 @@ class YtdlpPlugin : Plugin() {
 
         val jobId = call.getString("jobId") ?: UUID.randomUUID().toString()
         val bitrate = call.getString("bitrate") ?: "192"
+        // This comes from the lookup result. It lets the conversion monitor map
+        // the bytes ffmpeg has actually written back to media time.
+        val durationSeconds = (call.getDouble("durationSeconds")
+            ?: call.getInt("durationSeconds")?.toDouble()
+            ?: 0.0).coerceAtLeast(0.0)
         val embedThumbnail = call.getBoolean("embedThumbnail") ?: true
         val ytArgs = call.youtubeArgs()
         val verbose = call.getBoolean("verbose") ?: false
@@ -123,6 +131,8 @@ class YtdlpPlugin : Plugin() {
         // remove itself from the map.
         val job = App.downloadScope.launch(start = CoroutineStart.LAZY) {
             val workDir = File(context.filesDir, "downloads/$jobId")
+            var conversionMonitor: Job? = null
+            val conversionStarted = AtomicBoolean(false)
             try {
                 App.ensureNativeToolsReady()
                 workDir.mkdirs()
@@ -135,9 +145,14 @@ class YtdlpPlugin : Plugin() {
 
                 // Fetch the title up front so the exported file is named after the
                 // video rather than the opaque job id.
-                val title = runCatching {
-                    YoutubeDL.getInstance().getInfo(singleVideo(url, resolvedArgs)).title
+                val videoInfo = runCatching {
+                    YoutubeDL.getInstance().getInfo(singleVideo(url, resolvedArgs))
                 }.getOrNull()
+                val title = videoInfo?.title
+                // A caller may skip the visible lookup step. The native lookup above is
+                // then the fallback that keeps conversion progress measurable.
+                val conversionDurationSeconds = durationSeconds.takeIf { it > 0.0 }
+                    ?: (videoInfo?.duration?.toDouble() ?: 0.0)
 
                 val request = singleVideo(url, resolvedArgs).apply {
                     addOption("-f", "bestaudio/best")
@@ -157,11 +172,23 @@ class YtdlpPlugin : Plugin() {
                 }
 
                 YoutubeDL.getInstance().execute(request, jobId) { progress, etaSeconds, line ->
+                    if (line.contains("[ExtractAudio]") &&
+                        conversionStarted.compareAndSet(false, true)
+                    ) {
+                        conversionMonitor = launchConversionMonitor(
+                            jobId = jobId,
+                            workDir = workDir,
+                            durationSeconds = conversionDurationSeconds,
+                            bitrateKbps = bitrate.toIntOrNull() ?: 192,
+                        )
+                    }
                     notifyListeners("progress", JSObject().apply {
                         put("jobId", jobId)
                         put("progress", progress.coerceIn(0f, 100f))
                         put("etaSeconds", etaSeconds)
                         put("line", line)
+                        put("phase", if (conversionStarted.get()) "converting" else "downloading")
+                        put("measured", false)
                     })
                 }
 
@@ -199,6 +226,7 @@ class YtdlpPlugin : Plugin() {
                 })
                 call.rejectWith(message, t)
             } finally {
+                conversionMonitor?.cancel()
                 workDir.deleteRecursively()
                 jobs.remove(jobId)
                 if (jobs.isEmpty()) DownloadService.stop(context)
@@ -207,6 +235,55 @@ class YtdlpPlugin : Plugin() {
 
         jobs[jobId] = job
         job.start()
+    }
+
+    /**
+     * yt-dlp waits for ffmpeg as a child process and exposes no frame-level callback.
+     * During MP3 encoding, however, ffmpeg writes the target file continuously. With a
+     * requested CBR bitrate, its current size is the amount of source media encoded so
+     * far. Sampling that file therefore gives a genuine, monotonic conversion position;
+     * its rate over wall time gives the ETA. The final metadata/thumbnail pass is kept
+     * below 100% because it has no measurable media position of its own.
+     */
+    private fun launchConversionMonitor(
+        jobId: String,
+        workDir: File,
+        durationSeconds: Double,
+        bitrateKbps: Int,
+    ) = App.downloadScope.launch {
+        if (durationSeconds <= 0.0 || bitrateKbps <= 0) return@launch
+
+        val startedAt = System.nanoTime()
+        var lastProgress = 0.0
+        while (isActive) {
+            val output = workDir.listFiles()
+                ?.filter { it.isFile && it.extension.equals("mp3", ignoreCase = true) }
+                ?.maxByOrNull { it.lastModified() }
+            val bytes = output?.length() ?: 0L
+            if (bytes > 0) {
+                val encodedSeconds = bytes.toDouble() * 8.0 / (bitrateKbps * 1_000.0)
+                val progress = (encodedSeconds / durationSeconds * 100.0)
+                    .coerceIn(lastProgress, 99.0)
+                lastProgress = progress
+                val elapsed = (System.nanoTime() - startedAt) / 1_000_000_000.0
+                val encodingRate = if (elapsed > 0.0) encodedSeconds / elapsed else 0.0
+                val eta = if (encodingRate > 0.0) {
+                    ((durationSeconds - encodedSeconds).coerceAtLeast(0.0) / encodingRate)
+                        .toInt()
+                } else {
+                    0
+                }
+                notifyListeners("progress", JSObject().apply {
+                    put("jobId", jobId)
+                    put("phase", "converting")
+                    put("measured", true)
+                    put("progress", progress)
+                    put("etaSeconds", eta)
+                    put("line", "[ExtractAudio] encoding mp3")
+                })
+            }
+            delay(350)
+        }
     }
 
     /** Mints (or returns the cached) PO token. Useful for a diagnostics screen. */

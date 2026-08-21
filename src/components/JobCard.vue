@@ -27,8 +27,7 @@ const statusLabel = computed(() => {
     case 'downloading':
       return t('downloader.job.status.downloading', { percent: Math.round(props.job.progress) })
     case 'converting':
-      // ffmpeg reports no useful percentage during this pass, so don't imply one.
-      return t('downloader.job.status.converting')
+      return t('downloader.job.status.converting', { percent: Math.round(props.job.progress) })
     case 'done':
       return props.job.location
         ? t('downloader.job.status.done', { location: props.job.location })
@@ -61,7 +60,7 @@ const statusLabel = computed(() => {
         <p class="status-line">
           <span v-if="isPlayable" class="play-mark" aria-hidden="true">&#9654;</span>
           <span class="status-text">{{ statusLabel }}</span>
-          <span v-if="job.status === 'downloading' && formatEta(job.etaSeconds)" class="detail">
+          <span v-if="(job.status === 'downloading' || job.status === 'converting') && formatEta(job.etaSeconds)" class="detail">
             {{ formatEta(job.etaSeconds) }}
           </span>
           <span v-if="job.status === 'done' && formatBytes(job.size)" class="detail">
@@ -90,7 +89,7 @@ const statusLabel = computed(() => {
 
     <div v-if="isActive" class="progress-track">
       <div
-        v-if="job.status === 'downloading'"
+        v-if="job.status === 'downloading' || job.status === 'converting'"
         class="progress-fill"
         :style="{ '--progress-fill': `${job.progress}%` }"
       />
@@ -234,9 +233,8 @@ const statusLabel = computed(() => {
     var(--progress-gradient);
 }
 
-/* ffmpeg's pass (and the queued state before the first byte) report no percentage, so
-   this shows motion instead of a fake number: a short slice of the gradient sliding
-   across the track, not the full-sweep uncover technique above. */
+/* Queued is genuinely unmeasurable, so only it gets an indeterminate marker. Conversion
+   samples the growing MP3 file in the native layer and uses the ordinary measured bar. */
 .progress-fill.indeterminate {
   width: 35%;
   background: var(--progress-gradient);

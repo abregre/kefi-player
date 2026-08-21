@@ -21,6 +21,7 @@ import { Ytdlp } from '../plugins/ytdlp'
  * @property {JobStatus} status
  * @property {number} progress
  * @property {number} etaSeconds
+ * @property {number} [durationSeconds] Source media duration, used by the native conversion meter.
  * @property {string} [error]
  * @property {string} [displayName]
  * @property {number} [size]
@@ -106,13 +107,27 @@ async function attachListeners() {
   await Ytdlp.addListener('progress', (event) => {
     const job = findJob(event.jobId)
     if (!job || !isActive(job.status)) return
-    // yt-dlp reports -1 until the first bytes land, and re-runs the progress curve for
-    // the ffmpeg pass; treat anything negative as "not yet known" rather than 0, so the
-    // bar never jumps backwards.
-    job.progress = event.progress < 0 ? job.progress : event.progress
-    job.etaSeconds = event.etaSeconds
+    // yt-dlp reports -1 until the first bytes land. During conversion the native layer
+    // samples the MP3 that ffmpeg is really writing, so this is a second, independent
+    // 0–100 curve rather than the download percentage carried over into the next phase.
     job.line = event.line
-    job.status = event.line.includes('[ExtractAudio]') ? 'converting' : 'downloading'
+    if (event.phase === 'converting') {
+      // The last downloader callback is normally 100%. It describes received bytes,
+      // not encoded audio, so never carry it into the conversion bar.
+      if (job.status !== 'converting') {
+        job.status = 'converting'
+        job.progress = 0
+        job.etaSeconds = 0
+      }
+      if (event.measured) {
+        job.progress = event.progress < 0 ? job.progress : event.progress
+        job.etaSeconds = event.etaSeconds
+      }
+    } else {
+      job.progress = event.progress < 0 ? job.progress : event.progress
+      job.etaSeconds = event.etaSeconds
+      job.status = 'downloading'
+    }
   })
 
   await Ytdlp.addListener('completed', (event) => {
@@ -231,13 +246,20 @@ export function useDownloads() {
       url,
       title: info?.title ?? url,
       thumbnail: info?.thumbnail ?? null,
+      durationSeconds: info?.duration ?? 0,
       status: 'queued',
       progress: 0,
       etaSeconds: 0,
     })
 
     try {
-      await Ytdlp.download({ url, jobId: id, bitrate, embedThumbnail: true })
+      await Ytdlp.download({
+        url,
+        jobId: id,
+        bitrate,
+        durationSeconds: info?.duration ?? 0,
+        embedThumbnail: true,
+      })
       // Terminal state is applied by the 'completed' listener.
     } catch (err) {
       // The 'failed'/'cancelled' listeners normally cover this. This catch is for

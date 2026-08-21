@@ -39,6 +39,7 @@ import { registerPlugin } from '@capacitor/core'
  *   url: string,
  *   jobId?: string,
  *   bitrate?: Bitrate,
+ *   durationSeconds?: number,
  *   embedThumbnail?: boolean,
  * }} DownloadOptions
  * `jobId` — supply your own so you can cancel it later; otherwise the native side makes one.
@@ -68,6 +69,8 @@ import { registerPlugin } from '@capacitor/core'
  * @property {string} jobId
  * @property {number} progress 0–100. yt-dlp reports -1 briefly before the first byte arrives.
  * @property {number} etaSeconds
+ * @property {'downloading' | 'converting'} [phase] The current measured operation.
+ * @property {boolean} [measured] True when progress/ETA came from the MP3 encoder itself.
  * @property {string} line Raw yt-dlp output line. Looks like debug noise but is
  *   load-bearing: the UI switches a job from "downloading" to "converting" when
  *   `line.includes('[ExtractAudio]')`.

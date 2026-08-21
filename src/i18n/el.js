@@ -136,7 +136,7 @@ export default {
   'downloader.play.error': 'Δεν μπορέσαμε να ανοίξουμε αυτό το αρχείο.',
   'downloader.job.status.queued': 'Ξεκινάει…',
   'downloader.job.status.downloading': 'Λήψη {percent}%',
-  'downloader.job.status.converting': 'Μετατροπή σε MP3…',
+  'downloader.job.status.converting': 'Μετατροπή σε MP3 {percent}%',
   'downloader.job.status.done': 'Αποθηκεύτηκε στο {location}',
   'downloader.job.status.doneGeneric': 'Αποθηκεύτηκε',
   'downloader.job.status.failed': 'Αποτυχία',

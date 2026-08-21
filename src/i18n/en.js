@@ -134,7 +134,7 @@ export default {
   'downloader.play.error': 'Could not open that file.',
   'downloader.job.status.queued': 'Starting…',
   'downloader.job.status.downloading': 'Downloading {percent}%',
-  'downloader.job.status.converting': 'Converting to MP3…',
+  'downloader.job.status.converting': 'Converting to MP3 {percent}%',
   'downloader.job.status.done': 'Saved to {location}',
   'downloader.job.status.doneGeneric': 'Saved',
   'downloader.job.status.failed': 'Failed',
