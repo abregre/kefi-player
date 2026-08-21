@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from '../i18n'
 import { useDownloads } from '../composables/useDownloads'
 import { Ytdlp } from '../plugins/ytdlp'
@@ -7,6 +8,8 @@ import { formatDuration, looksLikeUrl, looksLikeYoutube } from '../utils/format'
 import JobCard from '../components/JobCard.vue'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const {
   jobs,
   engineVersion,
@@ -119,55 +122,25 @@ async function handleUpdateEngine() {
   }
 }
 
-/**
- * A link shared from the YouTube app is parked natively before the WebView is ready,
- * so this is checked on mount and again whenever the app returns to the foreground.
- * Only fills the field — it deliberately stops short of starting a download, the same
- * as `$SRC/src/App.vue`'s `checkSharedUrl`.
- */
-async function checkSharedUrl() {
-  try {
-    const { url: shared } = await Ytdlp.consumeSharedUrl()
-    if (shared) {
-      url.value = shared
-      await handleLookup()
-    }
-  } catch {
-    // No share pending, or running in the web mock (which always returns null).
-  }
+/** App.vue consumes native shares; this view receives the URL after it has navigated here. */
+async function applySharedUrl(shared) {
+  if (typeof shared !== 'string' || !shared.trim()) return
+  url.value = shared
+  await router.replace({ name: 'downloader', query: {} })
+  await handleLookup()
 }
-
-function onVisibilityChange() {
-  if (document.visibilityState === 'visible') void checkSharedUrl()
-}
-
-// Attach-once guard for the `sharedUrl` plugin listener, same idea as `listenersReady`
-// in `src/composables/usePlayer.js`: this screen mounts fresh each time the hidden tab
-// is opened and `onUnmounted` below detaches it, but the flag also protects against
-// `onMounted` somehow firing twice for the same instance and stacking a second listener.
-let sharedUrlListenerAttached = false
-/** @type {{ remove: () => Promise<void> } | null} */
-let sharedUrlListenerHandle = null
 
 onMounted(async () => {
-  if (!sharedUrlListenerAttached) {
-    sharedUrlListenerAttached = true
-    sharedUrlListenerHandle = await Ytdlp.addListener('sharedUrl', () => {
-      void checkSharedUrl()
-    })
-  }
   // Unpacks yt-dlp/ffmpeg and, once a day, updates yt-dlp over the network. This tab
   // is hidden behind an easter egg, so this call must live HERE — a user who never
   // opens it must generate zero network traffic.
   await initialize()
-  await checkSharedUrl()
-  document.addEventListener('visibilitychange', onVisibilityChange)
+  await applySharedUrl(route.query.sharedUrl)
 })
 
-onUnmounted(() => {
-  document.removeEventListener('visibilitychange', onVisibilityChange)
-  void sharedUrlListenerHandle?.remove()
-  sharedUrlListenerAttached = false
+watch(() => route.query.sharedUrl, (shared) => {
+  // A second share while the downloader is already open reuses this component.
+  void applySharedUrl(shared)
 })
 </script>
 

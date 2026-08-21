@@ -8,6 +8,9 @@ import { useI18n } from './i18n'
 import MiniPlayer from './components/MiniPlayer.vue'
 import TabBar from './components/TabBar.vue'
 import { usePlayer } from './composables/usePlayer'
+import router from './router'
+import { Ytdlp } from './plugins/ytdlp'
+import { unlocked } from './composables/useEasterEgg'
 
 const player = usePlayer()
 const { t } = useI18n()
@@ -22,10 +25,30 @@ const skipNotice = ref(false)
 /** @type {ReturnType<typeof setTimeout> | null} */
 let skipTimer = null
 
+/**
+ * The native side holds an incoming URL before the WebView is ready (cold launch),
+ * or announces it while the app is already open. The shell is always mounted, so it
+ * consumes that URL and routes to the view that owns the input field.
+ */
+async function openSharedDownload() {
+  if (!unlocked.value) return
+  try {
+    const { url } = await Ytdlp.consumeSharedUrl()
+    if (!url) return
+    await router.push({ name: 'downloader', query: { sharedUrl: url } })
+  } catch {
+    // The web fallback has no native share holder.
+  }
+}
+
 onMounted(() => {
   // Idempotent: wires the playerState push listener, the pull-on-resume handler,
   // and takes the first snapshot so the first render is never a default value.
   player.initialize()
+  void openSharedDownload()
+  void Ytdlp.addListener('sharedUrl', () => {
+    void openSharedDownload()
+  })
 })
 
 /*
