@@ -2,8 +2,11 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '../i18n'
 import { usePlaylists } from '../composables/usePlaylists'
+import { useLibrary } from '../composables/useLibrary'
 import { useTrackMenu } from '../composables/useTrackMenu'
+import { usePlayer } from '../composables/usePlayer'
 import { Player } from '../plugins/player'
+import { formatBytes, formatMs } from '../utils/format'
 
 /*
  * The app's first bottom sheet. It intentionally stays ONE component with no external
@@ -47,9 +50,12 @@ const emit = defineEmits(['view-in-folder'])
 
 const { t } = useI18n()
 const { playlists, isFavorite, toggleFavorite, createPlaylist, addToPlaylist } = usePlaylists()
-const { activeTrack, closeTrackMenu } = useTrackMenu()
+const { activeTrack, queueIndex, closeTrackMenu } = useTrackMenu()
+const player = usePlayer()
 
-/** 'menu' = the five top-level actions; 'playlist' = the add-to-playlist step. */
+/** 'menu' = the six top-level actions; 'playlist' = the add-to-playlist step; 'details' = the
+ *  file-details step; 'confirmDelete' = the styled "are you sure?" step in front of
+ *  `onDeleteFromDevice`'s actual delete call (see `openConfirmDeleteStep` below). */
 const step = ref('menu')
 /** Shows the inline "new playlist" text input in place of the "New playlist…" button. */
 const creatingPlaylist = ref(false)
@@ -62,6 +68,20 @@ const busy = ref(false)
 /** @type {import('vue').Ref<{ kind: 'info' | 'error' | 'success', text: string } | null>} */
 const notice = ref(null)
 
+/** getFileDetails()'s resolved value once the details step's on-demand fetch completes. Stays
+ *  null both before the fetch starts and if it rejects — either way the three on-demand fields
+ *  below fall back to "not available" once `fileDetailsLoading` goes false, exactly as a real
+ *  device resolving those fields to null would render. This is deliberately NOT routed through
+ *  `busy`/`notice`: unlike onSetAsRingtone, a failed lookup here isn't a destructive action gone
+ *  wrong, just "we couldn't show extra info" — no error notice, no disabling of other controls.
+ *  @type {import('vue').Ref<{ absolutePath: string | null, bitrate: number | null, sampleRate: number | null } | null>} */
+const fileDetails = ref(null)
+/** True only while the getFileDetails() round trip for the currently-open details step is in
+ *  flight, so the three on-demand fields can show a loading state instead of a blank/`null`
+ *  flash before it resolves. The free fields never need this — they come straight off
+ *  `activeTrack`, already in hand the instant the step opens. */
+const fileDetailsLoading = ref(false)
+
 const isFavourite = computed(() => (activeTrack.value ? isFavorite(activeTrack.value) : false))
 
 // Covers both a fresh open AND jumping straight from one track's menu to another's
@@ -73,6 +93,11 @@ watch(activeTrack, () => {
   creatingPlaylist.value = false
   newPlaylistName.value = ''
   notice.value = null
+  // A stale details fetch for the PREVIOUS track resolving after the user has already jumped
+  // to a new one (same skip-the-null-in-between case the comment above already covers) must
+  // not leave that old bitrate/sample-rate/path sitting under the new track's details step.
+  fileDetails.value = null
+  fileDetailsLoading.value = false
 })
 
 watch(creatingPlaylist, async (showing) => {
@@ -95,11 +120,98 @@ function openPlaylistStep() {
   notice.value = null
 }
 
+/** Opens the details step and kicks off the on-demand fetch immediately — the free fields
+ *  render on this same tick straight from `activeTrack` in the template, no waiting needed. */
+async function openDetailsStep() {
+  if (!activeTrack.value) return
+  step.value = 'details'
+  notice.value = null
+  fileDetails.value = null
+  fileDetailsLoading.value = true
+  // Snapshot the uri being looked up: openTrackMenu() can swap `activeTrack` to a different
+  // track while this call is still in flight (same re-entrancy the top-of-file comment and the
+  // watch(activeTrack) reset above both already guard against), and a stale resolve landing
+  // after that swap must not overwrite the NEW track's (already-reset) details state.
+  const uri = activeTrack.value.uri
+  try {
+    const details = await Player.getFileDetails({ uri })
+    if (activeTrack.value?.uri === uri) fileDetails.value = details
+  } catch {
+    // See fileDetails' own doc comment: a failed lookup here just leaves the "not available"
+    // fallback showing, no error notice.
+  } finally {
+    if (activeTrack.value?.uri === uri) fileDetailsLoading.value = false
+  }
+}
+
+/** Opens the `confirmDelete` step, naming the real filename (`displayName`, not `title` — a
+ *  confirmation for a destructive, irreversible action should name the actual file on disk,
+ *  not a possibly-edited-looking tag value) via the EXISTING `trackMenu.confirmDelete` body
+ *  text rendered in that step. Used to route through `window.confirm()` here, the same
+ *  destructive-action gate `PlaylistView.vue`'s `deleteThis()` still uses — but this sheet is
+ *  itself now a real component that can host that confirmation as one more step instead of a
+ *  second, OS-owned dialog idiom, so the gate moved into the UI (see the `confirmDelete`
+ *  template branch) and this just opens it. */
+function openConfirmDeleteStep() {
+  if (!activeTrack.value) return
+  step.value = 'confirmDelete'
+  notice.value = null
+}
+
+/**
+ * Deletes the file from device storage. Only ever called from the `confirmDelete` step's
+ * Delete button now (see `openConfirmDeleteStep` above) — the user has already confirmed via
+ * that styled step by the time this runs, so there is no `window.confirm()` gate at the top
+ * of this function any more.
+ *
+ * `Player.deleteTrack` itself still shows its OWN, second, OS-owned confirmation dialog
+ * (Must NOT Have 7) before anything is actually removed, so this can resolve one of three
+ * ways, handled with the same rigor as `onSetAsRingtone` above: a real deletion, a user
+ * decline of that OS dialog (not an error — nothing changed, so no reload), or a genuine
+ * failure.
+ */
+async function onDeleteFromDevice() {
+  if (!activeTrack.value || busy.value) return
+  busy.value = true
+  notice.value = null
+  try {
+    const { deleted, reason } = await Player.deleteTrack({ uri: activeTrack.value.uri })
+    if (deleted) {
+      // useLibrary()'s `tracks` is a module-level cache, never re-queried on its own
+      // (useLibrary.js's own doc comment) — without this the deleted track would keep
+      // showing in every list until something unrelated forced a reload.
+      useLibrary().reload()
+      // Used to deliberately leave the sheet open here (same precedent as
+      // onSetAsRingtone's own success branch) so the user could read a success notice
+      // before closeTrackMenu() nulls `activeTrack` out from under it. The user has now
+      // explicitly asked for delete's success case to close the sheet instead, so this
+      // is a requested exception to that pattern, not a change to it elsewhere. No
+      // `notice.value` is set on this branch any more either: since closing happens on
+      // the same tick, a success notice would never actually be visible — setting one
+      // would be dead code, not real feedback — so the sheet closing IS the feedback now.
+      closeTrackMenu()
+    } else if (reason === 'cancelled') {
+      // The user backed out of THAT second, OS-owned dialog — nothing on disk changed,
+      // so unlike the branch above, no reload() call, and this is not an error.
+      notice.value = { kind: 'info', text: t('trackMenu.deleteCancelled') }
+    }
+  } catch {
+    // A real failure. Reuses the same generic `actionFailed` string onSetAsRingtone's own
+    // catch block already uses for its equivalent case, rather than a second near-identical
+    // "something went wrong" key.
+    notice.value = { kind: 'error', text: t('trackMenu.actionFailed') }
+  } finally {
+    busy.value = false
+  }
+}
+
 function backToMenu() {
   step.value = 'menu'
   creatingPlaylist.value = false
   newPlaylistName.value = ''
   notice.value = null
+  fileDetails.value = null
+  fileDetailsLoading.value = false
 }
 
 function cancelNewPlaylist() {
@@ -168,6 +280,32 @@ async function onSetAsRingtone(type) {
   }
 }
 
+async function onQueueAction(action) {
+  if (!activeTrack.value || busy.value) return
+  busy.value = true
+  notice.value = null
+  try {
+    if (await player[action](activeTrack.value)) close()
+    else notice.value = { kind: 'error', text: t('trackMenu.actionFailed') }
+  } catch {
+    notice.value = { kind: 'error', text: t('trackMenu.actionFailed') }
+  } finally {
+    busy.value = false
+  }
+}
+
+async function onRemoveFromQueue() {
+  if (queueIndex.value === null || busy.value) return
+  busy.value = true
+  notice.value = null
+  try {
+    if (await player.removeQueueItem(queueIndex.value)) close()
+    else notice.value = { kind: 'error', text: t('trackMenu.actionFailed') }
+  } finally {
+    busy.value = false
+  }
+}
+
 function onViewInFolder() {
   if (!activeTrack.value) return
   // Every listener (LibraryView, PlaylistView, NowPlayingView) navigates to/within the
@@ -179,6 +317,34 @@ function onViewInFolder() {
   const track = activeTrack.value
   closeTrackMenu()
   emit('view-in-folder', track)
+}
+
+/** @param {number | null | undefined} bitrate Bits per second, getFileDetails()'s own unit
+ *  (T2's notepad entry — `MediaMetadataRetriever.METADATA_KEY_BITRATE` is bps). Shown in kbps,
+ *  the unit listeners actually recognise. */
+function formatBitrate(bitrate) {
+  return bitrate == null ? t('trackMenu.notAvailable') : `${Math.round(bitrate / 1000)} kbps`
+}
+
+/** @param {number | null | undefined} sampleRate Hz, getFileDetails()'s own unit. `Number(...)`
+ *  drops a trailing `.0` (48000 -> "48 kHz") while keeping one decimal where it matters
+ *  (44100 -> "44.1 kHz"). */
+function formatSampleRate(sampleRate) {
+  return sampleRate == null
+    ? t('trackMenu.notAvailable')
+    : `${Number((sampleRate / 1000).toFixed(1))} kHz`
+}
+
+/** `dateAdded` is epoch SECONDS, not milliseconds (player.js's own JSDoc on `PlayerTrack`), and
+ *  `0` means MediaStore never recorded one (the same convention usePlaylists.js's "Recently
+ *  added" sort already relies on) — both need handling before `Date` ever sees the number,
+ *  which otherwise expects milliseconds and would render the Unix epoch itself for an undated
+ *  track. No date formatter already exists anywhere in this codebase (checked format.js and
+ *  every other formatter call site), so this is the minimal `toLocaleDateString()` form rather
+ *  than a new formatter module for a single call site.
+ *  @param {number} dateAdded */
+function formatDateAdded(dateAdded) {
+  return dateAdded ? new Date(dateAdded * 1000).toLocaleDateString() : t('trackMenu.notAvailable')
 }
 </script>
 
@@ -194,7 +360,7 @@ function onViewInFolder() {
       >
         <div class="sheet-header">
           <button
-            v-if="step === 'playlist'"
+            v-if="step === 'playlist' || step === 'details' || step === 'confirmDelete'"
             type="button"
             class="icon-button"
             :aria-label="t('trackMenu.back')"
@@ -205,7 +371,15 @@ function onViewInFolder() {
             </svg>
           </button>
           <p class="sheet-title">
-            {{ step === 'menu' ? activeTrack.title : t('trackMenu.addToPlaylist') }}
+            {{
+              step === 'menu'
+                ? activeTrack.title
+                : step === 'details'
+                  ? t('trackMenu.fileDetails')
+                  : step === 'confirmDelete'
+                    ? t('trackMenu.deleteFromDevice')
+                    : t('trackMenu.addToPlaylist')
+            }}
           </p>
           <button
             type="button"
@@ -220,6 +394,7 @@ function onViewInFolder() {
         </div>
 
         <template v-if="step === 'menu'">
+          <div class="menu-tiles">
           <button type="button" class="option" :disabled="busy" @click="onToggleFavourite">
             <span class="option-icon" aria-hidden="true">
               <svg
@@ -246,6 +421,39 @@ function onViewInFolder() {
               </svg>
             </span>
             <span class="option-label">{{ t('trackMenu.addToPlaylist') }}</span>
+          </button>
+
+          <button type="button" class="option" :disabled="busy" @click="onQueueAction('playNext')">
+            <span class="option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M4 7h9M4 12h9M4 17h9M16 9v8M12 13h8" />
+              </svg>
+            </span>
+            <span class="option-label">{{ t('trackMenu.playNext') }}</span>
+          </button>
+
+          <button type="button" class="option" :disabled="busy" @click="onQueueAction('addToQueue')">
+            <span class="option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M4 7h11M4 12h11M4 17h11M18 14v7M14.5 17.5h7" />
+              </svg>
+            </span>
+            <span class="option-label">{{ t('trackMenu.addToQueue') }}</span>
+          </button>
+
+          <button
+            v-if="queueIndex !== null"
+            type="button"
+            class="option danger-option"
+            :disabled="busy"
+            @click="onRemoveFromQueue"
+          >
+            <span class="option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12M11 11v4M13 11v4" />
+              </svg>
+            </span>
+            <span class="option-label">{{ t('trackMenu.removeFromQueue') }}</span>
           </button>
 
           <button
@@ -289,6 +497,136 @@ function onViewInFolder() {
             </span>
             <span class="option-label">{{ t('trackMenu.viewInFolder') }}</span>
           </button>
+
+          <button type="button" class="option" @click="openDetailsStep">
+            <span class="option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 11v5M12 8h.01" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="option-label">{{ t('trackMenu.fileDetails') }}</span>
+          </button>
+
+          <button type="button" class="option" :disabled="busy" @click="openConfirmDeleteStep">
+            <span class="option-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-.867 12.142A2 2 0 0 1 14.138 21H9.862a2 2 0 0 1-1.995-1.858L7 7" />
+              </svg>
+            </span>
+            <span class="option-label">{{ t('trackMenu.deleteFromDevice') }}</span>
+          </button>
+          </div>
+        </template>
+
+        <template v-else-if="step === 'confirmDelete'">
+          <!-- A short "are you sure?" step, not a `.option` list — closer in spirit to the
+               'playlist' step's inline "New playlist…" prompt (a message plus actions) than
+               to 'details'' label/value `<dl>`, though it doesn't need to literally reuse
+               either markup. -->
+          <div class="confirm-delete">
+            <p class="confirm-message">
+              {{ t('trackMenu.confirmDelete', { name: activeTrack.displayName }) }}
+            </p>
+            <div class="confirm-actions">
+              <button type="button" class="text-button" :disabled="busy" @click="backToMenu">
+                {{ t('trackMenu.cancel') }}
+              </button>
+              <button
+                type="button"
+                class="text-button danger"
+                :disabled="busy"
+                @click="onDeleteFromDevice"
+              >
+                {{ t('trackMenu.delete') }}
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <template v-else-if="step === 'details'">
+          <dl class="details-list">
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailTitle') }}</dt>
+              <dd class="detail-value">{{ activeTrack.title }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailArtist') }}</dt>
+              <dd class="detail-value">{{ activeTrack.artist ?? t('trackMenu.notAvailable') }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailAlbum') }}</dt>
+              <dd class="detail-value">{{ activeTrack.album ?? t('trackMenu.notAvailable') }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailAlbumArtist') }}</dt>
+              <dd class="detail-value">
+                {{ activeTrack.albumArtist ?? t('trackMenu.notAvailable') }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailTrackNumber') }}</dt>
+              <dd class="detail-value">
+                {{ activeTrack.trackNumber ?? t('trackMenu.notAvailable') }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailYear') }}</dt>
+              <dd class="detail-value">{{ activeTrack.year ?? t('trackMenu.notAvailable') }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailDuration') }}</dt>
+              <dd class="detail-value">{{ formatMs(activeTrack.durationMs) }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailSize') }}</dt>
+              <dd class="detail-value">
+                {{ formatBytes(activeTrack.size) || t('trackMenu.notAvailable') }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailDateAdded') }}</dt>
+              <dd class="detail-value">{{ formatDateAdded(activeTrack.dateAdded) }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailFolder') }}</dt>
+              <dd class="detail-value">{{ activeTrack.folder || t('trackMenu.notAvailable') }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailMimeType') }}</dt>
+              <dd class="detail-value">
+                {{ activeTrack.mimeType ?? t('trackMenu.unknownFormat') }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailPath') }}</dt>
+              <dd class="detail-value">
+                {{
+                  fileDetailsLoading
+                    ? t('trackMenu.detailLoading')
+                    : (fileDetails?.absolutePath ?? t('trackMenu.notAvailable'))
+                }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailBitrate') }}</dt>
+              <dd class="detail-value">
+                {{
+                  fileDetailsLoading ? t('trackMenu.detailLoading') : formatBitrate(fileDetails?.bitrate)
+                }}
+              </dd>
+            </div>
+            <div class="detail-row">
+              <dt class="detail-label">{{ t('trackMenu.detailSampleRate') }}</dt>
+              <dd class="detail-value">
+                {{
+                  fileDetailsLoading
+                    ? t('trackMenu.detailLoading')
+                    : formatSampleRate(fileDetails?.sampleRate)
+                }}
+              </dd>
+            </div>
+          </dl>
         </template>
 
         <template v-else>
@@ -443,8 +781,8 @@ function onViewInFolder() {
   height: 1.3rem;
 }
 
-/* Same row shape as SettingsView.vue's `.option`, reused verbatim so this sheet doesn't
-   invent a second "list row" idiom next to the one Settings already established. */
+/* Shared action shape. The playlist-picker step remains a conventional row list; the main
+   menu below turns the same semantic buttons into compact, touch-friendly tiles. */
 .option {
   display: flex;
   align-items: center;
@@ -494,6 +832,112 @@ function onViewInFolder() {
   color: var(--text-muted);
 }
 
+.menu-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem 0.45rem;
+}
+
+.menu-tiles .option {
+  min-height: 5.9rem;
+  padding: 0.6rem 0.35rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface-2);
+  text-align: center;
+}
+
+.menu-tiles .option:active {
+  background: var(--accent-soft);
+}
+
+.menu-tiles .option-icon {
+  width: 1.65rem;
+  height: 1.65rem;
+}
+
+.menu-tiles .option-label {
+  flex: initial;
+  width: 100%;
+  min-height: 2.15em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  font-size: 0.74rem;
+  line-height: 1.15;
+}
+
+.menu-tiles .danger-option {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.menu-tiles .danger-option .option-icon {
+  color: var(--danger);
+}
+
+/* The details step isn't a list of tappable actions like `.option` above, so it gets its own
+   label/value row shape instead of being forced into that button markup. `<dl>` because this
+   genuinely is a set of term/description pairs, not a list of items. */
+.details-list {
+  margin: 0;
+  padding: 0.25rem 1rem 0.5rem;
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-row:last-child {
+  border-bottom: 0;
+}
+
+.detail-label {
+  flex-shrink: 0;
+  width: 40%;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.detail-value {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.88rem;
+  overflow-wrap: break-word;
+  text-align: right;
+}
+
+/* Same "message plus actions" shape as `.new-playlist-form` below, not the `.option` list or
+   the `.details-list` `<dl>` — this step is neither a list of tappable actions nor a set of
+   label/value pairs, just a short prompt with two buttons. */
+.confirm-delete {
+  padding: 0.5rem 1rem 0.25rem;
+}
+
+.confirm-message {
+  margin: 0 0 0.6rem;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .new-playlist-form {
   padding: 0.5rem 1rem 0.25rem;
 }
@@ -536,6 +980,13 @@ function onViewInFolder() {
 .text-button.primary {
   color: var(--on-accent);
   background: var(--accent);
+}
+
+/* Same --danger/--danger-soft pairing `.notice.error` below already uses for this app's one
+   other danger-coloured surface, not a new colour invented for this button. */
+.text-button.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .text-button:disabled {

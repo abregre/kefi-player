@@ -158,19 +158,27 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
            reserved it (no layout shift when a track loads), and disabled-but-visible is
            this app's own idiom for "not applicable right now" (TrackMenu.vue's own
            `.option:disabled` during a busy round trip). -->
-      <button
-        type="button"
-        class="icon-button"
-        :disabled="!track"
-        :aria-label="t('trackMenu.open')"
-        @click="openTrackMenu(track)"
-      >
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="12" cy="5" r="1.7" />
-          <circle cx="12" cy="12" r="1.7" />
-          <circle cx="12" cy="19" r="1.7" />
-        </svg>
-      </button>
+      <div class="bar-actions">
+        <button type="button" class="icon-button" :aria-label="t('queue.title')" @click="router.push('/queue')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M5 6h14M5 12h14M5 18h14" />
+            <path d="M3 6h.01M3 12h.01M3 18h.01" stroke-width="3" stroke-linecap="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          :disabled="!track"
+          :aria-label="t('trackMenu.open')"
+          @click="openTrackMenu(track)"
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="12" cy="5" r="1.7" />
+            <circle cx="12" cy="12" r="1.7" />
+            <circle cx="12" cy="19" r="1.7" />
+          </svg>
+        </button>
+      </div>
     </header>
 
     <template v-if="player.mediaId.value">
@@ -324,6 +332,8 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
   align-items: center;
   justify-content: space-between;
 }
+
+.bar-actions { display: flex; align-items: center; }
 
 .bar-title {
   font-size: 0.72rem;

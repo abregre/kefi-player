@@ -220,6 +220,75 @@ export function usePlayer() {
     }
   }
 
+  async function getQueue() {
+    try {
+      return await Player.getQueue()
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return { items: [], currentIndex: 0 }
+    }
+  }
+
+  async function moveQueueItem(from, to) {
+    try {
+      applySnapshot(await Player.moveQueueItem({ from, to }))
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
+  async function removeQueueItem(index) {
+    try {
+      applySnapshot(await Player.removeQueueItem({ index }))
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
+  async function jumpToQueueIndex(index) {
+    try {
+      applySnapshot(await Player.jumpToQueueIndex({ index }))
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
+  async function addToQueue(track) {
+    if (!track?.uri) return false
+    if (queueLength.value === 0) {
+      await setQueue({ uris: [track.uri] })
+      return !stateError.value
+    }
+    try {
+      applySnapshot(await Player.addToQueue({ uri: track.uri }))
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
+  async function playNext(track) {
+    if (!track?.uri) return false
+    if (queueLength.value === 0) {
+      await setQueue({ uris: [track.uri] })
+      return !stateError.value
+    }
+    try {
+      applySnapshot(await Player.playNext({ uri: track.uri }))
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
   async function next() {
     try {
       applySnapshot(await Player.next())
@@ -285,6 +354,12 @@ export function usePlayer() {
     resume,
     seek,
     setQueue,
+    getQueue,
+    moveQueueItem,
+    removeQueueItem,
+    jumpToQueueIndex,
+    addToQueue,
+    playNext,
     next,
     previous,
     setShuffle,

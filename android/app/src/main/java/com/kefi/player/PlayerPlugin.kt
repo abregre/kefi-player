@@ -1,14 +1,18 @@
 package com.kefi.player
 
 import android.Manifest
+import android.app.RecoverableSecurityException
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.content.pm.PackageManager
+import android.media.MediaMetadataRetriever
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -25,7 +29,9 @@ import com.getcapacitor.annotation.PermissionCallback
 import com.kefi.player.library.FavoriteTrack
 import com.kefi.player.library.LibraryDatabase
 import com.kefi.player.library.Playlist
+import kotlin.coroutines.resume
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
 
 /**
@@ -88,6 +94,78 @@ class PlayerPlugin : Plugin() {
         if (!wasPlaying) {
             context.stopService(Intent(context, PlaybackService::class.java))
         }
+    }
+
+    /**
+     * Returns persisted sound choices even when no player exists. Equalizer bands/presets are
+     * only available after a track has created a real ExoPlayer audio session; inventing a fixed
+     * five-band layout here would be wrong on many Android devices.
+     */
+    @PluginMethod
+    fun getSoundSettings(call: PluginCall) {
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
+    }
+
+    @PluginMethod
+    fun setEqualizerEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        AudioEffectsManager.setEqualizerEnabled(context, enabled)
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
+    }
+
+    @PluginMethod
+    fun setEqualizerPreset(call: PluginCall) {
+        val preset = call.getInt("preset")
+        if (preset == null || preset < SoundEffectsStore.CUSTOM_PRESET) {
+            call.reject("A valid equalizer preset is required")
+            return
+        }
+        AudioEffectsManager.setEqualizerPreset(context, preset)
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
+    }
+
+    @PluginMethod
+    fun setEqualizerBandLevels(call: PluginCall) {
+        val levels = call.getArray("levels")
+        if (levels == null) {
+            call.reject("A levels array is required")
+            return
+        }
+        val parsed = (0 until levels.length()).mapNotNull { index ->
+            (levels.opt(index) as? Number)?.toInt()
+        }
+        if (parsed.size != levels.length()) {
+            call.reject("Every equalizer level must be a number")
+            return
+        }
+        AudioEffectsManager.setEqualizerBandLevels(context, parsed)
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
+    }
+
+    @PluginMethod
+    fun setVolumeBoosterEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        AudioEffectsManager.setVolumeBoosterEnabled(context, enabled)
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
+    }
+
+    @PluginMethod
+    fun setVolumeBoosterGain(call: PluginCall) {
+        val gainMb = call.getInt("gainMb")
+        if (gainMb == null || gainMb !in 0..SoundEffectsStore.MAX_BOOST_GAIN_MB) {
+            call.reject("gainMb must be between 0 and ${SoundEffectsStore.MAX_BOOST_GAIN_MB}")
+            return
+        }
+        AudioEffectsManager.setVolumeBoosterGain(context, gainMb)
+        call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
     }
 
     @PluginMethod
@@ -217,6 +295,116 @@ class PlayerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun getQueue(call: PluginCall) {
+        App.scope.launch {
+            try {
+                val items = JSArray()
+                PlayerController.getQueue().forEach { entry ->
+                    items.put(
+                        JSObject().apply {
+                            put("uri", entry.uri)
+                            put("title", entry.title)
+                            put("artist", entry.artist ?: JSONObject.NULL)
+                        },
+                    )
+                }
+                call.resolve(
+                    JSObject().apply {
+                        put("items", items)
+                        put("currentIndex", PlayerController.snapshot().currentIndex)
+                    },
+                )
+            } catch (t: Throwable) {
+                call.rejectWith("Could not read queue: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun moveQueueItem(call: PluginCall) {
+        val from = call.getInt("from")
+        val to = call.getInt("to")
+        if (from == null || to == null) {
+            call.reject("from and to indexes are required")
+            return
+        }
+        App.scope.launch {
+            try {
+                val currentIndex = PlayerController.snapshot().currentIndex
+                if (from == currentIndex || to == currentIndex) {
+                    call.reject("Cannot move the currently playing item")
+                    return@launch
+                }
+                PlayerController.moveQueueItem(from, to)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not move queue item: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun removeQueueItem(call: PluginCall) {
+        val index = call.getInt("index")
+        if (index == null) {
+            call.reject("An index is required")
+            return
+        }
+        App.scope.launch {
+            try {
+                if (index == PlayerController.snapshot().currentIndex) {
+                    call.reject("Cannot remove the currently playing item")
+                    return@launch
+                }
+                PlayerController.removeQueueItem(index)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not remove queue item: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun jumpToQueueIndex(call: PluginCall) {
+        val index = call.getInt("index")
+        if (index == null) {
+            call.reject("An index is required")
+            return
+        }
+        App.scope.launch {
+            try {
+                PlayerController.jumpToQueueIndex(index)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not jump to queue item: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
+    fun addToQueue(call: PluginCall) = addQueueItem(call, playNext = false)
+
+    @PluginMethod
+    fun playNext(call: PluginCall) = addQueueItem(call, playNext = true)
+
+    private fun addQueueItem(call: PluginCall, playNext: Boolean) {
+        val uri = call.getString("uri")
+        if (uri.isNullOrBlank()) {
+            call.reject("A uri is required")
+            return
+        }
+        App.scope.launch {
+            try {
+                val item = TrackSource.mediaItemsFor(context, listOf(uri)).first()
+                if (playNext) PlayerController.playNext(item) else PlayerController.addToQueue(item)
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not add queue item: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
     fun next(call: PluginCall) {
         App.scope.launch {
             try {
@@ -315,6 +503,221 @@ class PlayerPlugin : Plugin() {
             }
         }
     }
+
+    /**
+     * On-demand file details never included in `listTracks`'s bulk payload — the details
+     * step of the track menu (T3) calls this only when it actually opens, not for every row
+     * in the library, since [MediaMetadataRetriever.setDataSource] reads the file header and
+     * is too costly to pay for tracks nobody is looking at.
+     *
+     * `bitrate`/`sampleRate` come straight from the retriever, which per this plan's own
+     * findings (see the plan's Context section) is the SAME source MediaStore's own
+     * BITRATE/SAMPLERATE columns are populated from at scan time — calling it here just gets
+     * a guaranteed-fresh number for the same cost the OS already once paid, off the main
+     * thread. Either can legitimately come back null for a real, readable file (not every
+     * container/codec exposes them), which is why a missing value here is never a rejection
+     * — only a genuinely unreadable file (a bad uri, a revoked permission, a corrupt file the
+     * retriever itself throws on) is.
+     */
+    @PluginMethod
+    fun getFileDetails(call: PluginCall) {
+        val uriString = call.getString("uri")
+        if (uriString.isNullOrBlank()) {
+            call.reject("A uri is required")
+            return
+        }
+
+        // App.scope is already Dispatchers.IO-backed (see App.kt), so no separate
+        // withContext(Dispatchers.IO) hop is needed here — unlike TrackSource's own public
+        // functions, which need their own hop because THEY can also be called from
+        // elsewhere. This method's only caller is this plugin, already inside App.scope.
+        App.scope.launch {
+            try {
+                val uri = Uri.parse(uriString)
+
+                val retriever = MediaMetadataRetriever()
+                val bitrate: Long?
+                val sampleRate: Int?
+                try {
+                    retriever.setDataSource(context, uri)
+                    bitrate = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                        ?.toLongOrNull()
+                    sampleRate = retriever
+                        .extractMetadata(MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+                        ?.toIntOrNull()
+                } finally {
+                    // MediaMetadataRetriever does not implement Closeable on every API level
+                    // this app supports (minSdk 24), so an explicit try/finally is used here
+                    // instead of a use {} block — matches TrackSource.kt's own
+                    // loadArtworkBitmap idiom for the same class.
+                    retriever.release()
+                }
+
+                call.resolve(
+                    JSObject().apply {
+                        put("absolutePath", absolutePathOf(uri) ?: JSONObject.NULL)
+                        put("bitrate", bitrate ?: JSONObject.NULL)
+                        put("sampleRate", sampleRate ?: JSONObject.NULL)
+                    },
+                )
+            } catch (t: Throwable) {
+                call.rejectWith("Could not read file details: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
+     * Best-effort absolute path via the `DATA` column — deprecated by Android's own docs in
+     * favour of scoped storage, and this app deliberately holds no `MANAGE_EXTERNAL_STORAGE`
+     * permission (see the plan's Must NOT Have), which is the ONLY documented guarantee of a
+     * real value here on modern Android. Without that permission, Android's own docs only
+     * promise this column is present in the projection, not that its value is populated or
+     * accurate for a given row/API level/OEM — this was not verified against a real device or
+     * AOSP source this session (no device access; see the notepad for the honest confidence
+     * level). So this is treated as unreliable-by-design: any missing/blank/failing read
+     * degrades to `null` rather than throwing or guessing. It is shown to the user only, never
+     * used as an identity or for a write (see the plan's own note on this).
+     */
+    private fun absolutePathOf(uri: Uri): String? = try {
+        context.contentResolver
+            .query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
+            ?.use { cursor ->
+                val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                if (dataCol >= 0 && cursor.moveToFirst()) {
+                    cursor.getString(dataCol)?.takeIf { it.isNotBlank() }
+                } else {
+                    null
+                }
+            }
+    } catch (t: Throwable) {
+        null
+    }
+
+    /**
+     * Deletes the file at [uri] from the device. Three genuinely different native paths by
+     * `Build.VERSION.SDK_INT`, because scoped storage's write/delete permission model changed
+     * twice across this app's `minSdk 24`..`targetSdk 36` range — there is no single call that
+     * behaves correctly everywhere:
+     *
+     * - `< Q` (29): apps with write access to a MediaStore row (which this app has for rows it
+     *   scanned/owns, and broadly for audio before scoped storage) can just delete it. No system
+     *   confirmation exists at this API level for this case.
+     * - `== Q` (29) exactly: `ContentResolver.delete` can throw [RecoverableSecurityException]
+     *   for a row this app doesn't already have write access to. Unlike every exception this
+     *   file otherwise treats as a hard failure, this one carries a [android.app.PendingIntent]
+     *   (via `userAction.actionIntent`) that shows the user a system dialog asking them to grant
+     *   the access `delete()` needed. Critically, granting that access does NOT itself delete
+     *   anything — it only lifts the permission that made the first `delete()` call fail — so
+     *   the `delete()` call must be RETRIED after approval, or the file survives untouched.
+     * - `>= R` (30+): `RecoverableSecurityException` stops being how this is surfaced; instead
+     *   [MediaStore.createDeleteRequest] is called up front to get a [android.app.PendingIntent]
+     *   for the same kind of system confirmation. Its own contract, from `MediaStore.java`'s doc
+     *   comment on `createDeleteRequest`, is explicit: "When the user approves this request,
+     *   `ContentResolver.delete` will be called on these items... The requested operation will
+     *   have completely finished before this activity result is delivered." So on approval the
+     *   SYSTEM has already deleted the row by the time this method's callback fires — calling
+     *   `delete()` again here would be a redundant no-op at best, or an avoidable error on a row
+     *   the system just removed at worst. This is why only the `== Q` branch retries and this
+     *   one does not.
+     *
+     * Three genuinely distinct outcomes cross the bridge, mirroring `onSetAsRingtone`'s existing
+     * three-way rigor (`TrackMenu.vue:143-169`) rather than a naive try/catch: `{ deleted: true }`
+     * for a real deletion, `{ deleted: false, reason: "cancelled" }` for a user declining the
+     * system dialog (an expected, normal outcome — never a rejection), and a genuine `reject`
+     * only for something actually wrong (a bad uri, an I/O error, a row that was already gone).
+     */
+    @PluginMethod
+    fun deleteTrack(call: PluginCall) {
+        val uriString = call.getString("uri")
+        if (uriString.isNullOrBlank()) {
+            call.reject("A uri is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                val uri = Uri.parse(uriString)
+                val resolver = context.contentResolver
+
+                when {
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> {
+                        resolveDeleteRowCount(call, resolver.delete(uri, null, null))
+                    }
+
+                    Build.VERSION.SDK_INT == Build.VERSION_CODES.Q -> {
+                        try {
+                            resolveDeleteRowCount(call, resolver.delete(uri, null, null))
+                        } catch (e: RecoverableSecurityException) {
+                            // The exception's PendingIntent only obtains PERMISSION when
+                            // approved — the delete() call above did not succeed, so it must be
+                            // retried, unlike the >= R branch below where the system performs
+                            // the deletion itself.
+                            val approved = awaitIntentSenderApproval(
+                                e.userAction.actionIntent.intentSender,
+                            )
+                            if (approved) {
+                                resolveDeleteRowCount(call, resolver.delete(uri, null, null))
+                            } else {
+                                call.resolve(cancelledDeleteResult())
+                            }
+                        }
+                    }
+
+                    else -> {
+                        val pendingIntent = MediaStore.createDeleteRequest(resolver, listOf(uri))
+                        val approved = awaitIntentSenderApproval(pendingIntent.intentSender)
+                        if (approved) {
+                            // See this method's KDoc: createDeleteRequest's own documented
+                            // contract guarantees the system already performed the delete by
+                            // the time `approved` is true. No delete() call here.
+                            call.resolve(JSObject().put("deleted", true))
+                        } else {
+                            call.resolve(cancelledDeleteResult())
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                call.rejectWith("Could not delete track: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
+     * Shared by the `< Q` branch and the `== Q` retry-after-approval branch above: both end in
+     * exactly the same plain `ContentResolver.delete` call and must judge its result the same
+     * way. A `0` row count is treated as a genuine failure (reject), not a silent success — it
+     * means the row didn't exist or couldn't be deleted, which the caller needs to know, not a
+     * false "deleted" outcome.
+     */
+    private fun resolveDeleteRowCount(call: PluginCall, rowsDeleted: Int) {
+        if (rowsDeleted > 0) {
+            call.resolve(JSObject().put("deleted", true))
+        } else {
+            call.reject("No matching row was deleted")
+        }
+    }
+
+    /** The shared `{ deleted: false, reason: "cancelled" }` shape for a declined system dialog. */
+    private fun cancelledDeleteResult(): JSObject =
+        JSObject().put("deleted", false).put("reason", "cancelled")
+
+    /**
+     * Bridges [MainActivity.launchIntentSenderForResult]'s callback-based result (T4) into a
+     * suspend function this coroutine can `await` on. `deleteTrack` runs inside
+     * `App.scope.launch`, a coroutine, but T4's mechanism is a plain Java callback interface
+     * (`MainActivity.IntentSenderResultCallback`) fired later, from a completely different call
+     * stack (AndroidX's `ActivityResultRegistry`, once the user responds to the system dialog) —
+     * there is no direct way to "return" that value into a suspended call. [suspendCancellableCoroutine]
+     * is exactly kotlinx.coroutines' primitive for this: it suspends the calling coroutine and
+     * hands back a continuation that the callback resumes once, from wherever it happens to run.
+     */
+    private suspend fun awaitIntentSenderApproval(intentSender: IntentSender): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            (getActivity() as MainActivity).launchIntentSenderForResult(intentSender) { approved ->
+                continuation.resume(approved)
+            }
+        }
 
     // ---- Playlists and favourites ------------------------------------------------------
     //
@@ -747,6 +1150,38 @@ class PlayerPlugin : Plugin() {
         put("currentIndex", currentIndex)
     }
 
+    private fun AudioEffectsManager.Snapshot.toJSObject(): JSObject = JSObject().apply {
+        put("equalizer", JSObject().apply {
+            put("enabled", settings.equalizerEnabled)
+            put("preset", settings.equalizerPreset)
+            put("bandLevels", JSArray(settings.equalizerBandLevels))
+            put("ready", equalizerReady)
+            put("levelMinMb", equalizerLevelMinMb ?: JSONObject.NULL)
+            put("levelMaxMb", equalizerLevelMaxMb ?: JSONObject.NULL)
+            put("bands", JSArray().apply {
+                equalizerBands.forEach { band ->
+                    put(JSObject().apply {
+                        put("index", band.index)
+                        put("lowerFrequencyMilliHz", band.lowerFrequencyMilliHz)
+                        put("upperFrequencyMilliHz", band.upperFrequencyMilliHz)
+                        put("levelMb", band.levelMb)
+                    })
+                }
+            })
+            put("presets", JSArray().apply {
+                equalizerPresets.forEach { preset ->
+                    put(JSObject().put("id", preset.id).put("name", preset.name))
+                }
+            })
+        })
+        put("volumeBooster", JSObject().apply {
+            put("enabled", settings.volumeBoosterEnabled)
+            put("gainMb", settings.volumeBoosterGainMb)
+            put("maxGainMb", SoundEffectsStore.MAX_BOOST_GAIN_MB)
+            put("ready", volumeBoosterReady)
+        })
+    }
+
     /**
      * Exact key set T15/T16 build the library UI on (`.claude/notepads/
      * kefi-player-full-android-player/learnings.md`, `## T9`): `id`, `uri`, `title`,
@@ -766,5 +1201,6 @@ class PlayerPlugin : Plugin() {
         put("folder", folder)
         put("displayName", displayName)
         put("dateAdded", dateAdded)
+        put("mimeType", mimeType ?: JSONObject.NULL)
     }
 }

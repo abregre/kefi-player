@@ -4,7 +4,10 @@ import DownloaderView from '../views/DownloaderView.vue'
 import LibraryView from '../views/LibraryView.vue'
 import NowPlayingView from '../views/NowPlayingView.vue'
 import PlaylistView from '../views/PlaylistView.vue'
+import QueueView from '../views/QueueView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import EqualizerView from '../views/EqualizerView.vue'
+import VolumeBoosterView from '../views/VolumeBoosterView.vue'
 import { unlocked } from '../composables/useEasterEgg'
 import { usePlaylists } from '../composables/usePlaylists'
 import { useTrackMenu } from '../composables/useTrackMenu'
@@ -30,8 +33,11 @@ export const router = createRouter({
     { path: '/', redirect: '/library' },
     { path: '/library', name: 'library', component: LibraryView },
     { path: '/now-playing', name: 'nowPlaying', component: NowPlayingView },
+    { path: '/queue', name: 'queue', component: QueueView },
     { path: '/playlist/:id', name: 'playlist', component: PlaylistView },
     { path: '/settings', name: 'settings', component: SettingsView },
+    { path: '/settings/equalizer', name: 'equalizer', component: EqualizerView },
+    { path: '/settings/volume-booster', name: 'volumeBooster', component: VolumeBoosterView },
     // Guarded below: unlocked users only. Locked users are redirected to /library.
     { path: '/downloader', name: 'downloader', component: DownloaderView },
     // Anything unknown (a stale hash after an update) lands on the default tab

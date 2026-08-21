@@ -26,6 +26,9 @@ one deliberate exception; see below.
   'base' })`, so `ωδη` finds `Ωδή` and Greek sorts the way a Greek speaker expects.
 - **A mini-player that never remounts** (it lives outside `<RouterView>`) and a full
   Now Playing screen with seek, next/previous, shuffle and repeat.
+- **A live playing queue** with a dedicated view from Now Playing. Upcoming tracks can
+  be reordered or removed without restarting the current track; “Play next” and “Add to
+  queue” in a track’s options menu change this live queue only.
 - **Bilingual, Greek and English**, auto-detected from the device locale and
   switchable in Settings.
 - **Survives what Android does to apps.** The WebView can be destroyed and rebuilt —
@@ -58,7 +61,7 @@ at all.
 | `npm run build` | Web bundle → `dist/` |
 | `npm run sync` | `build` + `npx cap sync android` (copies `dist/` into the app) |
 | `npm run apk` | Debug APK, end to end (build → sync → Gradle) |
-| `npm run apk:release` | Signed release APK (needs a keystore, see below) |
+| `npm run apk:release` | Signed release APK from an exact `vMAJOR.MINOR.PATCH` Git tag (needs a keystore, see below) |
 | `npm run install:apk` | `adb install -r` the debug APK on a connected device |
 | `npm run dev:android` | Live-reload on device against the dev server |
 | `npm run open` | Open the project in Android Studio (snap path) |
@@ -159,11 +162,39 @@ same data, not rows in the `playlists` table.
 
 **The track options menu**: reached from a kebab button on every track row, and from Now
 Playing — the same menu either way: Favourite/Unfavourite, Add to playlist, Set as
-ringtone, Set as notification, View in folder. There is deliberately no one-tap heart
-anywhere in the UI; favouriting only happens through this menu. Setting a ringtone needs
-Android's `WRITE_SETTINGS` special permission, which the OS grants only through a trip to
-its own Settings app, never through the normal runtime-permission dialog — so the first
-attempt sends the user there instead of simply failing.
+ringtone, Set as notification, View in folder, File details, Delete from device. There is
+deliberately no one-tap heart anywhere in the UI; favouriting only happens through this
+menu. Setting a ringtone needs Android's `WRITE_SETTINGS` special permission, which the OS
+grants only through a trip to its own Settings app, never through the normal
+runtime-permission dialog — so the first attempt sends the user there instead of simply
+failing.
+
+**File details**, also from that menu, is a read-only screen. The fields already free on
+every track (title, artist, album, album artist, track number, year, duration, size, date
+added, folder, MIME type) render immediately; bitrate and sample rate are then fetched on
+demand via `MediaMetadataRetriever` — already part of the Android SDK and already used
+elsewhere in this codebase for embedded artwork, so this needed no new dependency — along
+with the file's real on-disk path. That path is display-only and best-effort: it comes from
+a MediaStore column Android has deprecated since API 29 and does not guarantee outside the
+broad `MANAGE_EXTERNAL_STORAGE` permission, which this app deliberately does not request, so
+it degrades to "not available" rather than guessing.
+
+**Delete from device**, from the same menu, is gated behind a confirmation naming the file.
+It works on every Android version this app supports (`minSdk 24` up), through three
+different native code paths, not one: a plain delete below Android 10, a per-file system
+permission dialog on Android 10 (`RecoverableSecurityException`), and one batched system
+dialog on Android 11 and newer (`MediaStore.createDeleteRequest`). In every one of those
+three paths, the confirmation the user actually sees is owned and shown by Android itself,
+not by this app — the app cannot skip, customise, or replace it.
+
+**Editing a track's tags (title/artist/album and similar) was considered and explicitly
+rejected**, not deferred: Android's own MediaStore code maintains a hard allowlist of
+columns any app may write, and title/artist/album/album artist/year/track are not on it, for
+any app, ever — a write is silently accepted and then reverted back to the real file's tags
+on the next media scan. See the file-details-and-delete plan's Context section for the full
+AOSP citation; the short version is that only rewriting the file's actual embedded tag bytes
+(ID3v2, MP4 atoms, Vorbis comments) changes what other apps see, and this app does not do
+that.
 
 **Two side effects on existing screens, worth calling out because they're visible**: a
 folder expanded in the Folders tab now stays expanded after leaving and returning to the
@@ -171,6 +202,14 @@ Library — a long-standing code comment already claimed this, but the state liv
 per-screen-instance and reset every time; that's now actually true. And the Library's
 selected tab (Songs / Albums / Artists / Folders / Playlists) now survives navigating
 away and back too, where it used to reset to Songs.
+
+## Playing queue
+
+The queue is the live Media3 playback list, separate from the Room-backed playlists above.
+Open it from Now Playing to see the ordered list and jump to any track. The current track and
+already-played entries are protected from queue edits; upcoming entries can be long-pressed and
+dragged to reorder, or removed from their options menu. “Play next” inserts directly after the
+current item, while “Add to queue” appends to the end.
 
 ## Roadmap
 
@@ -186,6 +225,25 @@ An equalizer was considered and explicitly declined.
 npm run keystore     # once, ever — creates ~/kefi-player-release.jks
 npm run apk:release
 ```
+
+## Release versioning
+
+Android versioning is derived automatically from Git. Use one of the release
+commands to bump `package.json` and `package-lock.json`, create a release commit,
+and create its matching Git tag. The tag becomes Android's user-visible version
+name; the Git commit count becomes its monotonically increasing Android version
+code.
+
+```bash
+npm run release:patch  # 0.0.0 -> 0.0.1, commits, and tags v0.0.1
+# or: npm run release:minor / npm run release:major
+npm run apk:release
+```
+
+The bump command requires a clean Git working tree, so commit or stash work
+first. Push the resulting commit and tag when ready: `git push --follow-tags`.
+Non-release builds receive a development version such as
+`1.0.0-dev.4+gabcdef0` (or `0.0.0-dev...` before the first release tag).
 
 `scripts/make-keystore.sh` writes `android/keystore.properties`, which
 `android/app/build.gradle` reads. Both the keystore and that file are git-ignored.

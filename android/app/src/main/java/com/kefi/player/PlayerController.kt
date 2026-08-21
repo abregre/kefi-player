@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +64,13 @@ object PlayerController {
         val repeatMode: Int,
         val queueLength: Int,
         val currentIndex: Int,
+    )
+
+    /** One live queue row, kept deliberately smaller than the library's Track contract. */
+    data class QueueEntry(
+        val uri: String,
+        val title: String,
+        val artist: String?,
     )
 
     @Volatile
@@ -163,6 +171,16 @@ object PlayerController {
     }
 
     private val listener = object : Player.Listener {
+        /**
+         * Queue edits (move/remove/insert) mutate Media3's timeline without necessarily
+         * changing playback state or the current item. Persist and broadcast here so the
+         * saved queue, widget, and any live WebView stay in sync with those mutations.
+         */
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            persistState()
+            broadcastState()
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             lastKnownIsPlaying = isPlaying
             if (isPlaying) consecutiveErrorCount = 0
@@ -370,6 +388,18 @@ object PlayerController {
     /** Live snapshot of the controller's current state — never a cached value. */
     suspend fun snapshot(): Snapshot = withController { it.toSnapshot() }
 
+    /** Reads the controller timeline in its current, native order. */
+    suspend fun getQueue(): List<QueueEntry> = withController { ctrl ->
+        (0 until ctrl.mediaItemCount).map { index ->
+            val item = ctrl.getMediaItemAt(index)
+            QueueEntry(
+                uri = item.localConfiguration?.uri?.toString().orEmpty(),
+                title = item.mediaMetadata.title?.toString().orEmpty(),
+                artist = item.mediaMetadata.artist?.toString(),
+            )
+        }
+    }
+
     /** Replaces the queue with a single [item] and starts playback immediately. */
     suspend fun play(item: MediaItem): Unit = withController {
         it.setMediaItem(item)
@@ -393,6 +423,30 @@ object PlayerController {
         it.setMediaItems(items, startIndex, C.TIME_UNSET)
         it.prepare()
         it.play()
+    }
+
+    /** Incremental queue edits deliberately never call setMediaItems/setQueue. */
+    suspend fun moveQueueItem(from: Int, to: Int): Unit = withController { ctrl ->
+        check(from != ctrl.currentMediaItemIndex && to != ctrl.currentMediaItemIndex) {
+            "Cannot move the currently playing item"
+        }
+        ctrl.moveMediaItem(from, to)
+    }
+
+    suspend fun removeQueueItem(index: Int): Unit = withController { ctrl ->
+        check(index != ctrl.currentMediaItemIndex) { "Cannot remove the currently playing item" }
+        ctrl.removeMediaItem(index)
+    }
+
+    suspend fun jumpToQueueIndex(index: Int): Unit = withController {
+        it.seekTo(index, 0L)
+        it.play()
+    }
+
+    suspend fun addToQueue(item: MediaItem): Unit = withController { it.addMediaItem(item) }
+
+    suspend fun playNext(item: MediaItem): Unit = withController { ctrl ->
+        ctrl.addMediaItem(ctrl.currentMediaItemIndex + 1, item)
     }
 
     suspend fun setShuffle(enabled: Boolean): Unit = withController { it.setShuffleModeEnabled(enabled) }

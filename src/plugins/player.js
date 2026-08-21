@@ -35,6 +35,16 @@ import { registerPlugin } from '@capacitor/core'
  * @property {number} dateAdded Epoch SECONDS (not milliseconds) that MediaStore indexed this
  *   file at — when the scanner saw it, not when the user acquired it. Bulk-scanned libraries
  *   tie often at second resolution, since every file from one scan lands in the same second.
+ * @property {string | null} mimeType The file's MIME type (`audio/mpeg`, `audio/mp4`), or
+ *   `null` when MediaStore never recorded one. Identifies the real file format for the
+ *   details view, instead of guessing from `displayName`'s extension.
+ */
+
+/**
+ * @typedef {Object} QueueEntry
+ * @property {string} uri
+ * @property {string} title
+ * @property {string | null} artist
  */
 
 /**
@@ -63,12 +73,24 @@ import { registerPlugin } from '@capacitor/core'
  * @property {(options: { positionMs: number }) => Promise<PlayerSnapshot>} seek
  * @property {(options: { uris: string[], startIndex?: number }) => Promise<PlayerSnapshot>} setQueue
  *   Replaces the whole queue and starts playback at `startIndex` (default 0).
+ * @property {() => Promise<{ items: QueueEntry[], currentIndex: number }>} getQueue
+ * @property {(options: { from: number, to: number }) => Promise<PlayerSnapshot>} moveQueueItem
+ * @property {(options: { index: number }) => Promise<PlayerSnapshot>} removeQueueItem
+ * @property {(options: { index: number }) => Promise<PlayerSnapshot>} jumpToQueueIndex
+ * @property {(options: { uri: string }) => Promise<PlayerSnapshot>} addToQueue
+ * @property {(options: { uri: string }) => Promise<PlayerSnapshot>} playNext
  * @property {() => Promise<PlayerSnapshot>} next
  * @property {() => Promise<PlayerSnapshot>} previous
  *   Media3's `seekToPrevious()` semantics: restarts the current track if more than ~3s in,
  *   otherwise moves to the previous queue item.
  * @property {(options: { enabled: boolean }) => Promise<PlayerSnapshot>} setShuffle
  * @property {(options: { mode: 'off' | 'one' | 'all' }) => Promise<PlayerSnapshot>} setRepeatMode
+ * @property {() => Promise<object>} getSoundSettings
+ * @property {(options: { enabled: boolean }) => Promise<object>} setEqualizerEnabled
+ * @property {(options: { preset: number }) => Promise<object>} setEqualizerPreset
+ * @property {(options: { levels: number[] }) => Promise<object>} setEqualizerBandLevels
+ * @property {(options: { enabled: boolean }) => Promise<object>} setVolumeBoosterEnabled
+ * @property {(options: { gainMb: number }) => Promise<object>} setVolumeBoosterGain
  * @property {() => Promise<{ tracks: PlayerTrack[] }>} listTracks
  *   Device-wide MediaStore query, on demand (no cache/database). Rejects with a message
  *   containing "permission" when the audio permission has not been granted.
@@ -114,6 +136,25 @@ import { registerPlugin } from '@capacitor/core'
  *   Sets the device ringtone or notification tone to `uri`. Gated behind the `WRITE_SETTINGS`
  *   special permission: resolves `{ granted: false }` rather than rejecting when it is absent,
  *   which is the UI's cue to route the user to system settings instead of showing an error.
+ * @property {(options: { uri: string }) => Promise<{ absolutePath: string | null, bitrate: number | null, sampleRate: number | null }>} getFileDetails
+ *   Fetched ON DEMAND, only when the track menu's details step actually opens — never called
+ *   as part of `listTracks`, since reading a file's header for every row in the library would
+ *   be far too costly to pay up front. `bitrate`/`sampleRate` come from a fresh
+ *   `MediaMetadataRetriever` read; either is `null` when the file simply doesn't carry that
+ *   value, which is a normal outcome, not an error. `absolutePath` is a best-effort,
+ *   display-only value (never an identity key, never used for a write) that can also be
+ *   `null` on some devices/API levels where scoped storage does not expose it.
+ * @property {(options: { uri: string }) => Promise<{ deleted: boolean, reason?: string }>} deleteTrack
+ *   Deletes the file at `uri` from device storage. Three real outcomes, not just the two the
+ *   type signature above shows: resolves `{ deleted: true }` when the file was actually
+ *   deleted; resolves `{ deleted: false, reason: 'cancelled' }` when the user declines the
+ *   OS-owned delete confirmation — a normal, expected outcome, never surfaced as an error; or
+ *   the promise REJECTS for a genuine unexpected failure (a malformed uri, an I/O error, a row
+ *   that was already gone). On Android this always routes through an OS-owned confirmation
+ *   dialog before anything is removed, and which exact dialog appears varies by Android
+ *   version — a detail the caller never needs to branch on differently, but should know
+ *   exists, the same way `setAsRingtone`'s own outcome can redirect the user to system
+ *   Settings.
  * @property {(eventName: 'playerState', listener: (event: PlayerSnapshot) => void) => Promise<import('@capacitor/core').PluginListenerHandle>} addListener
  *   Also fires for `eventName: 'trackUnavailable'` with a {@link PlayerTrackUnavailable}
  *   payload: emitted whenever the native controller fails to play a queue item (deleted/

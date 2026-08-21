@@ -263,6 +263,65 @@ EXCEPTIONS=$("${EMU[@]}" logcat -d | grep -icE "AndroidRuntime|FATAL EXCEPTION")
   pass "T10 logcat has zero fatal exceptions" ||
   fail "T10 logcat has $EXCEPTIONS fatal exception lines"
 
+# --- Playing queue ---------------------------------------------------------------
+
+step "Playing queue — native edits and queue screen"
+
+# Start from a known order. These direct bridge calls intentionally exercise the same native
+# Media3 mutations QueueView uses after a drag/menu action; CDP cannot synthesize its long-press
+# drag gesture reliably enough to make a pass meaningful.
+player "setQueue({ uris: $URIS, startIndex: 0 })" >/dev/null
+QUEUE=$(player "getQueue()")
+QUEUE_ORDER=$(node -e 'const q=JSON.parse(process.argv[1]); console.log(JSON.stringify(q.items.map(x=>x.uri)))' "$QUEUE")
+[[ "$QUEUE_ORDER" == "$URIS" && "$(jsonval "$QUEUE" currentIndex)" == 0 ]] &&
+  pass "queue getQueue returns the native order and current index" ||
+  fail "queue getQueue returned order=$QUEUE_ORDER currentIndex=$(jsonval "$QUEUE" currentIndex), expected $URIS / 0"
+
+player "moveQueueItem({ from: 2, to: 1 })" >/dev/null
+MOVED_QUEUE=$(player "getQueue()")
+MOVED_ORDER=$(node -e 'const q=JSON.parse(process.argv[1]); console.log(JSON.stringify(q.items.map(x=>x.uri)))' "$MOVED_QUEUE")
+EXPECTED_MOVED=$(node -e 'const u=JSON.parse(process.argv[1]); console.log(JSON.stringify([u[0],u[2],u[1]]))' "$URIS")
+[[ "$MOVED_ORDER" == "$EXPECTED_MOVED" ]] &&
+  pass "queue moveQueueItem changes order without replacing the queue" ||
+  fail "queue moveQueueItem returned $MOVED_ORDER, expected $EXPECTED_MOVED"
+
+CURRENT_REMOVE=$(player "removeQueueItem({ index: 0 })" 2>&1 || true)
+[[ "$CURRENT_REMOVE" == *"Cannot remove the currently playing item"* ]] &&
+  pass "queue rejects removal of the current item" ||
+  fail "queue current-item removal did not reject as expected: $CURRENT_REMOVE"
+
+player "removeQueueItem({ index: 2 })" >/dev/null
+REMOVED_QUEUE=$(player "getQueue()")
+[[ "$(jsonval "$REMOVED_QUEUE" items.length)" == 2 ]] &&
+  pass "queue removes an upcoming item" ||
+  fail "queue removeQueueItem left $(jsonval "$REMOVED_QUEUE" items.length) item(s), expected 2"
+
+player "playNext({ uri: JSON.parse('$URIS')[1] })" >/dev/null
+player "addToQueue({ uri: JSON.parse('$URIS')[2] })" >/dev/null
+INSERTED_QUEUE=$(player "getQueue()")
+INSERTED_ORDER=$(node -e 'const q=JSON.parse(process.argv[1]); console.log(JSON.stringify(q.items.map(x=>x.uri)))' "$INSERTED_QUEUE")
+EXPECTED_INSERTED=$(node -e 'const u=JSON.parse(process.argv[1]); console.log(JSON.stringify([u[0],u[1],u[2],u[2]]))' "$URIS")
+[[ "$INSERTED_ORDER" == "$EXPECTED_INSERTED" ]] &&
+  pass "queue playNext inserts after current and addToQueue appends" ||
+  fail "queue insertion order was $INSERTED_ORDER, expected $EXPECTED_INSERTED"
+
+js "location.hash = '#/queue'" > /dev/null
+sleep 1
+QUEUE_ROWS=$(js "document.querySelectorAll('.track-row').length")
+[[ "$QUEUE_ROWS" == 4 ]] &&
+  pass "queue route renders all live queue rows" ||
+  fail "queue route rendered $QUEUE_ROWS rows, expected 4"
+
+js "document.querySelectorAll('.track-row .row-main')[1]?.click()" > /dev/null
+sleep 1
+[[ "$(jsonval "$(player 'getPlayerState()')" currentIndex)" == 1 ]] &&
+  pass "queue row tap jumps to the selected item" ||
+  fail "queue row tap did not update currentIndex to 1"
+
+# Restore the fixture queue expected by the service/persistence checks below.
+player "setQueue({ uris: $URIS, startIndex: 0 })" >/dev/null
+js "location.hash = '#/now-playing'" > /dev/null
+
 # --- media-button routing pre-check ---------------------------------------------
 
 step "Media-button routing pre-check"
@@ -1092,6 +1151,171 @@ else
 fi
 
 # Navigate back to library so the existing Summary step is clean.
+goto_library
+
+# ── T9: File details menu row, delete-from-device confirm gate, and a mocked
+#    delete+reload round trip ───────────────────────────────────────────────
+#
+# HONESTY NOTE, mandatory per this task: none of the three real native SDK branches in
+# PlayerPlugin.kt's deleteTrack (the plain pre-Q resolver.delete path, the API 29
+# RecoverableSecurityException retry-after-approval path, or the API 30+
+# MediaStore.createDeleteRequest path) has ever executed, on any device or emulator, in any
+# session of this plan — and neither has the real OS-owned delete-confirmation dialog itself
+# ever been shown or answered. Both are unreachable from this script by construction:
+# MediaStore.createDeleteRequest's own documented contract requires that confirmation through a
+# SYSTEM dialog, not a WebView one — it never appears in the DOM, so nothing Runtime.evaluate
+# over CDP can see or click, and driving it with `input tap` would need a hardcoded pixel
+# coordinate that silently stops working the moment the dialog's layout moves (exactly the
+# failure mode this whole script's CDP-only approach exists to avoid; see the file's own header
+# comment). A first real device run of this feature should watch for the three distinct
+# outcomes `onDeleteFromDevice` maps in TrackMenu.vue: DELETED (the file is actually gone,
+# listTracks() no longer reports it, a success notice shown, the sheet stays open), CANCELLED
+# (the user backs out of the system dialog — no reload, an info notice, the file still present),
+# and REJECTED (a genuine native failure, including PlayerPlugin.kt's own zero-rows-deleted
+# rejection — surfaced as the app's generic actionFailed error notice). Every deleteTrack/
+# listTracks call below runs through a JS-layer stub assigned directly onto
+# Capacitor.Plugins.Player, never through the real native implementation: calling the real one
+# here would hang the suite on a system dialog nothing in this script can answer.
+
+step "T9 — File details menu row and delete-from-device confirm gate"
+
+goto_library
+select_tab 0
+
+TITLE_T9_RAW=$(js "document.querySelectorAll('.track-row .title')[0]?.textContent ?? ''")
+TITLE_T9=$(node -e 'console.log(JSON.parse(process.argv[1]))' "$TITLE_T9_RAW")
+
+SHEET_CLICK_T9=$(js "(() => {
+  const el = document.querySelectorAll('.row-menu')[0]
+  if (!el) return 'NO_ELEMENT'
+  el.click()
+  return 'OK'
+})()")
+
+if [[ "$SHEET_CLICK_T9" != '"OK"' ]]; then
+  fail "T9: .row-menu was not found on the first Songs row"
+else
+  sleep 1
+
+  # T3 added "File details" as the sheet's 6th .option (index 5); T7 added "Delete from device"
+  # as the 7th and last (index 6) — exact placement confirmed in this notepad's own T3/T7
+  # entries. TrackMenu.vue's real markup gives every .option row the same plain
+  # `<button class="option">` shape with no data-attribute or other stable per-row selector
+  # (confirmed by reading the file), so — the same index-based convention this script's own
+  # select_tab()/TABS comment already relies on for .segment — a row count is what is asserted
+  # here, which is exactly what a reverted T3 or T7 would change.
+  OPTION_COUNT_T9=$(js "document.querySelectorAll('.option').length")
+  [[ "$OPTION_COUNT_T9" == 7 ]] &&
+    pass "T9 menu: the options sheet shows 7 .option rows (5 pre-existing + File details + Delete from device)" ||
+    fail "T9 menu: the options sheet shows $OPTION_COUNT_T9 .option rows, expected 7"
+
+  # listTracks()'s own real artist for the opened track, read from the preflight's $TRACKS
+  # snapshot — a concrete expected value from real fixture data, not merely "is non-empty".
+  ARTIST_T9=$(node -e '
+    const { tracks } = JSON.parse(process.argv[1])
+    const track = tracks.find((t) => t.title === process.argv[2])
+    console.log(track ? (track.artist ?? "") : "")
+  ' "$TRACKS" "$TITLE_T9")
+
+  js "document.querySelectorAll('.option')[5]?.click()" > /dev/null
+  sleep 1
+
+  DETAIL_TITLE_T9_RAW=$(js "document.querySelectorAll('.detail-value')[0]?.textContent ?? ''")
+  DETAIL_TITLE_T9=$(node -e 'console.log(JSON.parse(process.argv[1]))' "$DETAIL_TITLE_T9_RAW")
+  DETAIL_ARTIST_T9_RAW=$(js "document.querySelectorAll('.detail-value')[1]?.textContent ?? ''")
+  DETAIL_ARTIST_T9=$(node -e 'console.log(JSON.parse(process.argv[1]))' "$DETAIL_ARTIST_T9_RAW")
+
+  [[ -n "$DETAIL_TITLE_T9" && "$DETAIL_TITLE_T9" == "$TITLE_T9" ]] &&
+    pass "T9 details: the details step's title value is '$DETAIL_TITLE_T9', matching the opened track" ||
+    fail "T9 details: details step title is '$DETAIL_TITLE_T9', expected '$TITLE_T9'"
+
+  [[ -n "$DETAIL_ARTIST_T9" && "$DETAIL_ARTIST_T9" == "$ARTIST_T9" ]] &&
+    pass "T9 details: the details step's artist value is '$DETAIL_ARTIST_T9', matching listTracks()'s real artist for '$TITLE_T9'" ||
+    fail "T9 details: details step artist is '$DETAIL_ARTIST_T9', expected '$ARTIST_T9' (from listTracks())"
+
+  # Back to the menu step (the sheet's own back button, present whenever step is 'details' or
+  # 'playlist' — it is always the FIRST .icon-button in DOM order when present) before touching
+  # the delete row.
+  js "document.querySelector('.icon-button')?.click()" > /dev/null
+  sleep 1
+
+  # window.confirm on a delete tap: grepped this file for "confirm" before writing this — no
+  # existing pattern was found for stubbing/observing it. Stubbed here rather than left
+  # untested, since this is a plain page-global JS function and overriding it from CDP is no
+  # different from any other DOM/JS manipulation this script already does elsewhere (e.g. the
+  # layout check's DOM mutation, or tap_support()'s real .click() calls) — this is NOT the same
+  # thing as the real OS-owned dialog Player.deleteTrack shows afterwards, which is the part the
+  # top-of-section HONESTY NOTE says cannot be driven this way. Returns false here so the code
+  # takes its documented early-return branch (`if (!window.confirm(...)) return`) and never
+  # reaches the real native call — genuinely safe to run against a real device.
+  js "window.__qaConfirmCalls = []; window.confirm = (msg) => { window.__qaConfirmCalls.push(msg); return false }" > /dev/null
+  js "document.querySelectorAll('.option')[6]?.click()" > /dev/null
+  sleep 1
+
+  CONFIRM_CALLS_T9=$(js "window.__qaConfirmCalls.length")
+  MENU_AFTER_DECLINE_T9=$(js "document.querySelectorAll('.option').length")
+  NOTICE_ABSENT_T9=$(js "document.querySelector('.notice') === null")
+
+  [[ "$CONFIRM_CALLS_T9" == 1 ]] &&
+    pass "T9 confirm gate: tapping Delete from device invoked window.confirm exactly once" ||
+    fail "T9 confirm gate: window.confirm was called $CONFIRM_CALLS_T9 times, expected 1"
+
+  [[ "$MENU_AFTER_DECLINE_T9" == 7 && "$NOTICE_ABSENT_T9" == true ]] &&
+    pass "T9 confirm gate: declining leaves the sheet on the menu step with no notice (the real native deleteTrack call never ran)" ||
+    fail "T9 confirm gate: after declining, .option count is $MENU_AFTER_DECLINE_T9 (expected 7) and notice-absent is $NOTICE_ABSENT_T9 (expected true)"
+
+  # Neither this checkbox's "mock deleteTrack resolving {deleted:true}" nor the row-count-drops-
+  # by-one assertion can come from the REAL native deleteTrack on an actual device: both the API
+  # 30+ MediaStore.createDeleteRequest path and the API 29 RecoverableSecurityException
+  # approval-retry path route through the real OS dialog the HONESTY NOTE above already covers,
+  # and even approving it would permanently remove one of the three real QA fixture files every
+  # other section in this suite depends on. So this stubs Capacitor.Plugins.Player.deleteTrack
+  # and .listTracks directly on the live plugin object — the same "call the plugin surface
+  # directly instead of the untestable gesture" precedent this notepad's T16 reorder-persistence
+  # check already used for a drag it could not synthesise. This proves ONLY the reload-wiring
+  # contract: that TrackMenu's real onDeleteFromDevice handler, on a resolved `{ deleted: true }`,
+  # really calls useLibrary().reload(), which really re-invokes listTracks() and really
+  # re-renders one fewer .track-row. It does NOT exercise the real native delete mechanics or
+  # the real OS confirmation dialog.
+  BEFORE_COUNT_T9=$(js "document.querySelectorAll('.track-row').length")
+
+  js "(() => {
+    window.__qaOriginalDeleteTrack = Capacitor.Plugins.Player.deleteTrack
+    window.__qaOriginalListTracks = Capacitor.Plugins.Player.listTracks
+    window.confirm = () => true
+    Capacitor.Plugins.Player.deleteTrack = async () => ({ deleted: true })
+    Capacitor.Plugins.Player.listTracks = async () => {
+      const real = await window.__qaOriginalListTracks.call(Capacitor.Plugins.Player)
+      return { tracks: real.tracks.slice(1) }
+    }
+    return 'OK'
+  })()" > /dev/null
+
+  js "document.querySelectorAll('.option')[6]?.click()" > /dev/null
+  sleep 2
+
+  AFTER_COUNT_T9=$(js "document.querySelectorAll('.track-row').length")
+  NOTICE_SUCCESS_T9=$(js "document.querySelector('.notice')?.classList.contains('success') ?? false")
+
+  [[ "$AFTER_COUNT_T9" == "$((BEFORE_COUNT_T9 - 1))" ]] &&
+    pass "T9 mock delete+reload: .track-row count dropped from $BEFORE_COUNT_T9 to $AFTER_COUNT_T9 after the stubbed deleteTrack resolved {deleted:true} and reload() re-ran listTracks" ||
+    fail "T9 mock delete+reload: .track-row count is $AFTER_COUNT_T9, expected $((BEFORE_COUNT_T9 - 1)) (was $BEFORE_COUNT_T9)"
+
+  [[ "$NOTICE_SUCCESS_T9" == true ]] &&
+    pass "T9 mock delete+reload: a success notice (.notice.success) is shown after the stubbed delete resolved" ||
+    fail "T9 mock delete+reload: no .notice.success shown after the stubbed delete (got $NOTICE_SUCCESS_T9)"
+
+  # Restore the real plugin methods and close the sheet, so nothing stubbed here leaks into
+  # whatever runs after this section.
+  js "(() => {
+    Capacitor.Plugins.Player.deleteTrack = window.__qaOriginalDeleteTrack
+    Capacitor.Plugins.Player.listTracks = window.__qaOriginalListTracks
+    delete window.confirm
+  })()" > /dev/null
+  js "document.querySelector('.backdrop')?.click()" > /dev/null
+  sleep 1
+fi
+
 goto_library
 
 step "Summary"

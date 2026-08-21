@@ -60,6 +60,13 @@ object TrackSource {
          * `0` means the column came back NULL (seen on some OEM providers) and sorts last.
          */
         val dateAdded: Long,
+        /**
+         * The file's MIME type as MediaStore recorded it (`audio/mpeg`, `audio/mp4`), or
+         * `null` on the rare row where the scanner never set one. Added for the details view
+         * to show a real format instead of guessing from [displayName]'s extension — additive
+         * to the T9 contract like the three fields above it.
+         */
+        val mimeType: String?,
     )
 
     /** In-memory only, at most 64 entries — an explicit Must NOT Have forbids anything durable. */
@@ -128,6 +135,7 @@ object TrackSource {
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DATE_ADDED,
             folderColumn(),
+            MediaStore.Audio.Media.MIME_TYPE,
         )
         // `IS_MUSIC = 1` is necessary but nowhere near sufficient. Android's media scanner
         // indexes by FILE EXTENSION, so anything an app happens to name `*.mp3` — a backup
@@ -170,6 +178,7 @@ object TrackSource {
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val folderCol = cursor.getColumnIndexOrThrow(folderColumn())
+                val mimeTypeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
@@ -192,6 +201,7 @@ object TrackSource {
                             folder = folderOf(cursor.getString(folderCol)),
                             displayName = displayName ?: "",
                             dateAdded = if (cursor.isNull(dateAddedCol)) 0L else cursor.getLong(dateAddedCol),
+                            mimeType = cursor.getString(mimeTypeCol),
                         )
                     )
                 }

@@ -22,6 +22,8 @@ import { computed, readonly, ref } from 'vue'
 // nothing that can fail to resolve.
 /** @type {import('vue').Ref<PlayerTrack | null>} */
 const activeTrack = ref(null)
+/** Queue index when the sheet was opened from QueueView; null everywhere else. */
+const queueIndex = ref(null)
 
 const isOpen = computed(() => activeTrack.value !== null)
 
@@ -30,8 +32,9 @@ const isOpen = computed(() => activeTrack.value !== null)
  * equivalent) with the exact track object the row was already holding.
  * @param {PlayerTrack} track
  */
-function openTrackMenu(track) {
+function openTrackMenu(track, options = {}) {
   activeTrack.value = track
+  queueIndex.value = Number.isInteger(options.queueIndex) ? options.queueIndex : null
 }
 
 /**
@@ -42,6 +45,7 @@ function openTrackMenu(track) {
  */
 function closeTrackMenu() {
   activeTrack.value = null
+  queueIndex.value = null
 }
 
 export function useTrackMenu() {
@@ -51,6 +55,7 @@ export function useTrackMenu() {
     // future view can't silently bypass whatever TrackMenu.vue itself resets (its `step`,
     // its in-progress "new playlist" input) when a menu opens or closes.
     activeTrack: readonly(activeTrack),
+    queueIndex: readonly(queueIndex),
     isOpen,
     openTrackMenu,
     closeTrackMenu,
