@@ -36,6 +36,7 @@ CHECKS=0
 
 pass() { CHECKS=$((CHECKS + 1)); echo "PASS  $*"; }
 fail() { CHECKS=$((CHECKS + 1)); FAILURES=$((FAILURES + 1)); echo "FAIL  $*"; }
+skip() { echo "SKIP  $*"; }
 step() { echo; echo "== $* =="; }
 abort() { echo "ABORT $*" >&2; exit 2; }
 
@@ -129,9 +130,23 @@ launch_app() {
 
 app_pid() { "${EMU[@]}" shell pidof "$PKG" | tr -d '\r' | awk '{print $1}'; }
 session_dump() { "${EMU[@]}" shell dumpsys media_session; }
-session_state() { session_dump | grep -m1 -oE "state=[A-Z]+\([0-9]\)" | grep -oE "\([0-9]\)" | tr -d '()'; }
-session_position() { session_dump | grep -m1 -oE "position=[0-9]+" | head -1 | cut -d= -f2; }
-session_title() { session_dump | grep -m1 -oE "description=[^,]*" | cut -d= -f2-; }
+# A physical device can have several active media sessions. Scope state/title/
+# position assertions to Kefi instead of accidentally reading another player.
+session_for_app() {
+  session_dump | awk -v pkg="$PKG" '
+    /^    [^[:space:]]/ {
+      if (keep) { printf "%s", block; exit }
+      block=$0 ORS
+      next
+    }
+    { block=block $0 ORS }
+    $0 ~ "package=" pkg { keep=1 }
+    END { if (keep) printf "%s", block }
+  '
+}
+session_state() { session_for_app | grep -m1 -oE "state=[A-Z]+\([0-9]\)" | grep -oE "\([0-9]\)" | tr -d '()'; }
+session_position() { session_for_app | grep -m1 -oE "position=[0-9]+" | head -1 | cut -d= -f2; }
+session_title() { session_for_app | grep -m1 -oE "description=[^,]*" | cut -d= -f2-; }
 
 # --- preflight -------------------------------------------------------------------
 
@@ -167,27 +182,33 @@ LISTED_JUNK=$(node -e '
   const { tracks } = JSON.parse(process.argv[1])
   console.log(tracks.filter((t) => /^auto(backup|playlist)/.test(t.title) || !t.durationMs).length)
 ' "$TRACKS")
+FIXTURE_LISTED=$(node -e '
+  const wanted = new Set(["Άσπρη Μέρα", "Zeibekiko", "Ωδή"])
+  const { tracks } = JSON.parse(process.argv[1])
+  console.log(tracks.filter((t) => wanted.has(t.title)).length)
+' "$TRACKS")
 if [[ "$MEDIASTORE_ROWS" -lt 2 ]]; then
   fail "the unplayable baits are missing from MediaStore — run npm run fixtures (found $MEDIASTORE_ROWS)"
 else
-  [[ "$LISTED_JUNK" == 0 && "$LISTED" == 3 ]] &&
-    pass "listTracks filtered out $MEDIASTORE_ROWS unplayable MediaStore rows and returned exactly 3" ||
-    fail "listTracks returned $LISTED tracks of which $LISTED_JUNK are unplayable (expected 3 and 0)"
+  [[ "$LISTED_JUNK" == 0 && "$FIXTURE_LISTED" == 3 ]] &&
+    pass "listTracks filtered out $MEDIASTORE_ROWS unplayable MediaStore rows and returned all 3 fixtures (total $LISTED)" ||
+    fail "listTracks returned $LISTED tracks, including $FIXTURE_LISTED fixtures and $LISTED_JUNK unplayable rows (expected 3 fixtures and 0 unplayable rows)"
 fi
 
 # The fixtures live in two directories (f3 sits in vol2/), which is what makes the
 # library's Folders grouping testable at all — and it exercises the `folder` field the
 # native TrackSource added for it.
-FOLDERS=$(node -e '
+FIXTURE_FOLDERS=$(node -e '
   const { tracks } = JSON.parse(process.argv[1])
-  const unique = [...new Set(tracks.map((t) => t.folder))].sort()
+  const wanted = new Set(["Άσπρη Μέρα", "Zeibekiko", "Ωδή"])
+  const unique = [...new Set(tracks.filter((t) => wanted.has(t.title)).map((t) => t.folder))].sort()
   console.log(JSON.stringify(unique))
 ' "$TRACKS")
-FOLDER_COUNT=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$FOLDERS")
-if [[ "$FOLDER_COUNT" == 2 && "$FOLDERS" == *"kefi-qa/vol2"* ]]; then
-  pass "listTracks reports the fixtures in 2 folders ($FOLDERS)"
+FOLDER_COUNT=$(node -e 'console.log(JSON.parse(process.argv[1]).length)' "$FIXTURE_FOLDERS")
+if [[ "$FOLDER_COUNT" == 2 && "$FIXTURE_FOLDERS" == *"kefi-qa/vol2"* ]]; then
+  pass "listTracks reports the fixtures in 2 folders ($FIXTURE_FOLDERS)"
 else
-  fail "listTracks reports $FOLDER_COUNT folder(s): $FOLDERS (expected 2, one of them kefi-qa/vol2)"
+  fail "listTracks reports fixture tracks in $FOLDER_COUNT folder(s): $FIXTURE_FOLDERS (expected 2, one of them kefi-qa/vol2)"
 fi
 
 URIS=$(node -e '
@@ -251,7 +272,7 @@ SNAP_TITLE=$(jsonval "$(player 'getPlayerState()')" title)
 # `metadata:` is the session's own line. It must carry the full title/artist/album triplet:
 # setting a display title instead silently turns it into "<title>, null, null", which is what
 # Bluetooth head units and older lock screens render.
-SESSION_META=$(session_dump | grep -m1 "metadata: size")
+SESSION_META=$(session_for_app | grep -m1 "metadata: size")
 if [[ "$SESSION_META" == *"Άσπρη Μέρα, Δήμητρα Παπαδοπούλου, Κέφι Vol 1"* ]]; then
   pass "T10 session metadata carries title, artist and album"
 else
@@ -286,10 +307,25 @@ EXPECTED_MOVED=$(node -e 'const u=JSON.parse(process.argv[1]); console.log(JSON.
   fail "queue moveQueueItem returned $MOVED_ORDER, expected $EXPECTED_MOVED"
 
 CURRENT_REMOVE=$(player "removeQueueItem({ index: 0 })" 2>&1 || true)
-[[ "$CURRENT_REMOVE" == *"Cannot remove the currently playing item"* ]] &&
+[[ "$CURRENT_REMOVE" == *"Only upcoming queue items may be removed"* ]] &&
   pass "queue rejects removal of the current item" ||
   fail "queue current-item removal did not reject as expected: $CURRENT_REMOVE"
 
+# History is protected too, not merely the row currently playing. The UI hides these edits,
+# but exercise the bridge directly so that a future caller cannot bypass the native invariant.
+player "jumpToQueueIndex({ index: 1 })" >/dev/null
+HISTORY_MOVE=$(player "moveQueueItem({ from: 0, to: 2 })" 2>&1 || true)
+[[ "$HISTORY_MOVE" == *"Only upcoming queue items may be moved"* ]] &&
+  pass "queue rejects moving an already-played item" ||
+  fail "queue history move did not reject as expected: $HISTORY_MOVE"
+
+HISTORY_REMOVE=$(player "removeQueueItem({ index: 0 })" 2>&1 || true)
+[[ "$HISTORY_REMOVE" == *"Only upcoming queue items may be removed"* ]] &&
+  pass "queue rejects removal of an already-played item" ||
+  fail "queue history removal did not reject as expected: $HISTORY_REMOVE"
+
+# Return to a stable current index before the upcoming-item and insertion cases below.
+player "setQueue({ uris: $URIS, startIndex: 0 })" >/dev/null
 player "removeQueueItem({ index: 2 })" >/dev/null
 REMOVED_QUEUE=$(player "getQueue()")
 [[ "$(jsonval "$REMOVED_QUEUE" items.length)" == 2 ]] &&
@@ -300,7 +336,7 @@ player "playNext({ uri: JSON.parse('$URIS')[1] })" >/dev/null
 player "addToQueue({ uri: JSON.parse('$URIS')[2] })" >/dev/null
 INSERTED_QUEUE=$(player "getQueue()")
 INSERTED_ORDER=$(node -e 'const q=JSON.parse(process.argv[1]); console.log(JSON.stringify(q.items.map(x=>x.uri)))' "$INSERTED_QUEUE")
-EXPECTED_INSERTED=$(node -e 'const u=JSON.parse(process.argv[1]); console.log(JSON.stringify([u[0],u[1],u[2],u[2]]))' "$URIS")
+EXPECTED_INSERTED=$(node -e 'const u=JSON.parse(process.argv[1]); console.log(JSON.stringify([u[0],u[1],u[1],u[2]]))' "$URIS")
 [[ "$INSERTED_ORDER" == "$EXPECTED_INSERTED" ]] &&
   pass "queue playNext inserts after current and addToQueue appends" ||
   fail "queue insertion order was $INSERTED_ORDER, expected $EXPECTED_INSERTED"
@@ -381,7 +417,7 @@ FGS_ERRORS=$("${EMU[@]}" logcat -d |
   pass "T5 logcat has zero foreground-service violations" ||
   fail "T5 logcat has $FGS_ERRORS foreground-service violation lines"
 
-NOTIF=$("${EMU[@]}" shell dumpsys notification --noredact | grep -A30 "pkg=$PKG")
+NOTIF=$("${EMU[@]}" shell dumpsys notification --noredact | grep -A80 "pkg=$PKG")
 echo "$NOTIF" | grep -q "channel=playback" &&
   pass "T5 notification posted on channel \"playback\"" ||
   fail "T5 no notification on channel \"playback\""
@@ -403,7 +439,7 @@ elif ! "${EMU[@]}" shell su 0 kill -9 "$RENDERER" 2>/dev/null; then
   # The shell user cannot signal another app's isolated process. Without root this
   # scenario simply cannot run, and saying so is the only honest outcome — the
   # assertions below would otherwise all "pass" against a renderer that never died.
-  fail "T8 could not kill the renderer (needs root: \`adb -s $SERIAL root\`, or a userdebug build)"
+  skip "T8 renderer-kill branch requires root/userdebug; production device cannot expose it"
 else
   sleep 12
   PID_AFTER=$(app_pid)

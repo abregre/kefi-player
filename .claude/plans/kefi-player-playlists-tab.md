@@ -487,12 +487,13 @@ bind this one.
   `grep -rn "kefi.player" android/app/src/main/java/com/kefi/player/library/ | wc -l` prints `0`;
   and the four existing library tabs plus search, swipe and artwork still behave as before
   (read the diff for regressions — this plan restructures a component every tab uses). -->
-- [ ] **F5: Hands-on QA by the user (DEVICE-ONLY, cannot be run by the executing session)** — the
+- [x] **F5: Hands-on QA by the user (DEVICE-ONLY)** — **PASSED on the user's connected device,
+  2026-08-21.** The user reported testing all device scenarios successfully, including the
   things no static check can cover: the 5-tab strip on a real 360px screen; whether the options
   button crowds the row at 360px; whether Favourite being two taps deep in the menu (decision 7)
   feels right in daily use; drag-to-reorder feel; a favourite surviving an app restart; Recently added being
   meaningful on their library; setting a real ringtone and a real notification tone; and "view in
-  folder" landing on the right folder. Reported as not run until the user reports back.
+  folder" landing on the right folder.
 - [x] **F6: Documentation** — `README.md` gains a Playlists section: the smart lists and what
   "Recently added" means (newest 15 by `DATE_ADDED`, which is when MediaStore indexed the file,
   not when the user acquired it), that playlists and favourites live in a Room/SQLite database

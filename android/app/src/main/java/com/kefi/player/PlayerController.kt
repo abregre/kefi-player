@@ -73,6 +73,17 @@ object PlayerController {
         val artist: String?,
     )
 
+    /**
+     * One coherent read of the native queue and its currently playing position.
+     *
+     * The timeline can change between separate controller calls, so callers which render the
+     * queue must use this rather than combining a queue read and [snapshot].
+     */
+    data class QueueSnapshot(
+        val entries: List<QueueEntry>,
+        val currentIndex: Int,
+    )
+
     @Volatile
     private var controller: MediaController? = null
 
@@ -388,16 +399,19 @@ object PlayerController {
     /** Live snapshot of the controller's current state — never a cached value. */
     suspend fun snapshot(): Snapshot = withController { it.toSnapshot() }
 
-    /** Reads the controller timeline in its current, native order. */
-    suspend fun getQueue(): List<QueueEntry> = withController { ctrl ->
-        (0 until ctrl.mediaItemCount).map { index ->
-            val item = ctrl.getMediaItemAt(index)
-            QueueEntry(
-                uri = item.localConfiguration?.uri?.toString().orEmpty(),
-                title = item.mediaMetadata.title?.toString().orEmpty(),
-                artist = item.mediaMetadata.artist?.toString(),
-            )
-        }
+    /** Reads the queue and current position atomically on the controller's owning thread. */
+    suspend fun getQueue(): QueueSnapshot = withController { ctrl ->
+        QueueSnapshot(
+            entries = (0 until ctrl.mediaItemCount).map { index ->
+                val item = ctrl.getMediaItemAt(index)
+                QueueEntry(
+                    uri = item.localConfiguration?.uri?.toString().orEmpty(),
+                    title = item.mediaMetadata.title?.toString().orEmpty(),
+                    artist = item.mediaMetadata.artist?.toString(),
+                )
+            },
+            currentIndex = ctrl.currentMediaItemIndex,
+        )
     }
 
     /** Replaces the queue with a single [item] and starts playback immediately. */
@@ -427,14 +441,14 @@ object PlayerController {
 
     /** Incremental queue edits deliberately never call setMediaItems/setQueue. */
     suspend fun moveQueueItem(from: Int, to: Int): Unit = withController { ctrl ->
-        check(from != ctrl.currentMediaItemIndex && to != ctrl.currentMediaItemIndex) {
-            "Cannot move the currently playing item"
+        check(from > ctrl.currentMediaItemIndex && to > ctrl.currentMediaItemIndex) {
+            "Only upcoming queue items may be moved"
         }
         ctrl.moveMediaItem(from, to)
     }
 
     suspend fun removeQueueItem(index: Int): Unit = withController { ctrl ->
-        check(index != ctrl.currentMediaItemIndex) { "Cannot remove the currently playing item" }
+        check(index > ctrl.currentMediaItemIndex) { "Only upcoming queue items may be removed" }
         ctrl.removeMediaItem(index)
     }
 
@@ -446,6 +460,9 @@ object PlayerController {
     suspend fun addToQueue(item: MediaItem): Unit = withController { it.addMediaItem(item) }
 
     suspend fun playNext(item: MediaItem): Unit = withController { ctrl ->
+        check(ctrl.currentMediaItemIndex in 0 until ctrl.mediaItemCount) {
+            "Cannot play next without an existing queue item; start playback or set a queue first"
+        }
         ctrl.addMediaItem(ctrl.currentMediaItemIndex + 1, item)
     }
 

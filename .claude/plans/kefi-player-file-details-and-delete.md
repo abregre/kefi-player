@@ -361,7 +361,8 @@ finding, not from `ContentResolver.update()`.
   `favorites`/`playlist_items`; no multi-select scaffolding; the three SDK branches in `deleteTrack`
   are each reachable (not dead code behind a wrong version guard); T4's chosen mechanism is
   generic, not delete-specific, and does not silently duplicate or suppress the OS confirmation UI.
-- [ ] **F5: Hands-on QA by the user (DEVICE-ONLY, cannot be run by the executing session)** — the
+- [x] **F5: Hands-on QA by the user (DEVICE-ONLY)** — **PASSED on the user's connected device,
+  2026-08-21.** The user reported testing all device scenarios successfully, including the
   things no static check can cover: the details sheet showing correct real bitrate/sample-rate/
   absolute path for a real file; deleting a track on whichever real Android version the user's
   device runs, confirming the OS dialog appears, confirming the file is actually gone (not just

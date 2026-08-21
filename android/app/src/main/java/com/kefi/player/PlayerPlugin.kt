@@ -298,8 +298,9 @@ class PlayerPlugin : Plugin() {
     fun getQueue(call: PluginCall) {
         App.scope.launch {
             try {
+                val queue = PlayerController.getQueue()
                 val items = JSArray()
-                PlayerController.getQueue().forEach { entry ->
+                queue.entries.forEach { entry ->
                     items.put(
                         JSObject().apply {
                             put("uri", entry.uri)
@@ -311,7 +312,7 @@ class PlayerPlugin : Plugin() {
                 call.resolve(
                     JSObject().apply {
                         put("items", items)
-                        put("currentIndex", PlayerController.snapshot().currentIndex)
+                        put("currentIndex", queue.currentIndex)
                     },
                 )
             } catch (t: Throwable) {
@@ -331,8 +332,8 @@ class PlayerPlugin : Plugin() {
         App.scope.launch {
             try {
                 val currentIndex = PlayerController.snapshot().currentIndex
-                if (from == currentIndex || to == currentIndex) {
-                    call.reject("Cannot move the currently playing item")
+                if (from <= currentIndex || to <= currentIndex) {
+                    call.reject("Only upcoming queue items may be moved")
                     return@launch
                 }
                 PlayerController.moveQueueItem(from, to)
@@ -352,8 +353,8 @@ class PlayerPlugin : Plugin() {
         }
         App.scope.launch {
             try {
-                if (index == PlayerController.snapshot().currentIndex) {
-                    call.reject("Cannot remove the currently playing item")
+                if (index <= PlayerController.snapshot().currentIndex) {
+                    call.reject("Only upcoming queue items may be removed")
                     return@launch
                 }
                 PlayerController.removeQueueItem(index)

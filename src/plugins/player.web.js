@@ -181,21 +181,24 @@ export class PlayerWeb extends WebPlugin {
   }
 
   async moveQueueItem({ from, to }) {
-    if (from === this.state.currentIndex || to === this.state.currentIndex) {
-      throw new Error('Cannot move the currently playing item')
+    if (from <= this.state.currentIndex || to <= this.state.currentIndex) {
+      throw new Error('Only upcoming queue items may be moved')
+    }
+    if (from < 0 || from >= this.queue.length || to < 0 || to >= this.queue.length) {
+      throw new Error('Queue item does not exist')
     }
     const [item] = this.queue.splice(from, 1)
-    if (item === undefined) throw new Error('Queue item does not exist')
     this.queue.splice(to, 0, item)
+    // Both endpoints are upcoming entries, so the currently playing item stays at the same
+    // index and retains its metadata and playback position, matching Media3's timeline move.
     this.emitState()
     return { ...this.state }
   }
 
   async removeQueueItem({ index }) {
-    if (index === this.state.currentIndex) throw new Error('Cannot remove the currently playing item')
+    if (index <= this.state.currentIndex) throw new Error('Only upcoming queue items may be removed')
     if (index < 0 || index >= this.queue.length) throw new Error('Queue item does not exist')
     this.queue.splice(index, 1)
-    if (index < this.state.currentIndex) this.state.currentIndex -= 1
     this.state.queueLength = this.queue.length
     this.emitState()
     return { ...this.state }
@@ -215,6 +218,9 @@ export class PlayerWeb extends WebPlugin {
   }
 
   async playNext({ uri }) {
+    if (!Number.isInteger(this.state.currentIndex) || this.state.currentIndex < 0 || this.state.currentIndex >= this.queue.length) {
+      throw new Error('Cannot play next without an existing queue item; start playback or set a queue first')
+    }
     this.queue.splice(this.state.currentIndex + 1, 0, uri)
     this.state.queueLength = this.queue.length
     this.emitState()

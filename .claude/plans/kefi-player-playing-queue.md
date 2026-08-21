@@ -92,8 +92,8 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
 
 - Build env: `JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto ANDROID_HOME=/home/nonos/Android/Sdk`.
 - Route: `/queue`, pushed from `NowPlayingView.vue`, closed via `router.back()`.
-- No device, no emulator, no release build this session. Verification ceiling: `npm run build`,
-  `./gradlew :app:compileDebugKotlin`, `npm run apk`, greps, reading the diff.
+- No device or emulator this session. Build verification completed with JDK 21:
+  `:app:compileDebugKotlin`, `npm run apk` (debug APK), and offline `assembleRelease` all pass.
 
 ## Must Have
 
@@ -165,7 +165,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
     reading the six existing branches first, don't assume the names). `./gradlew
     :app:compileDebugKotlin 2>&1 | grep -c '^e:'` prints `0`.
 
-- [ ] **T2: `getQueue()`**
+- [x] **T2: `getQueue()`**
   - Files: `android/app/src/main/java/com/kefi/player/PlayerController.kt`,
     `android/app/src/main/java/com/kefi/player/PlayerPlugin.kt`, `src/plugins/player.js`,
     `src/plugins/player.web.js`.
@@ -186,7 +186,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
     android/app/src/main/java/com/kefi/player/PlayerPlugin.kt src/plugins/player.js
     src/plugins/player.web.js` shows all four. `compileDebugKotlin` 0 errors.
 
-- [ ] **T3: `moveQueueItem(from, to)` and `removeQueueItem(index)`**
+- [x] **T3: `moveQueueItem(from, to)` and `removeQueueItem(index)`**
   - Files: same four as T2.
   - `PlayerController`: `suspend fun moveItem(from: Int, to: Int): Unit = withController {
     it.moveMediaItem(from, to) }`; `suspend fun removeItem(index: Int): Unit = withController { ctrl
@@ -204,14 +204,14 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
   - QA Scenario: `grep -n "moveQueueItem\|removeQueueItem\|currentMediaItemIndex\|check(" android/app/src/main/java/com/kefi/player/PlayerController.kt`
     shows the guard present. `compileDebugKotlin` 0 errors.
 
-- [ ] **T4: `jumpToQueueIndex(index)`**
+- [x] **T4: `jumpToQueueIndex(index)`**
   - Files: same four as T2.
   - `PlayerController`: `suspend fun jumpToIndex(index: Int): Unit = withController { it.seekTo(index,
     0L); it.play() }` — unconditional `play()`, per decision 4 (tapping always starts playback).
   - QA Scenario: `grep -n "jumpToQueueIndex\|seekTo" android/app/src/main/java/com/kefi/player/PlayerController.kt`
     shows it. `compileDebugKotlin` 0 errors.
 
-- [ ] **T5: `addToQueue(uri)` and `playNext(uri)`**
+- [x] **T5: `addToQueue(uri)` and `playNext(uri)`**
   - Files: same four as T2.
   - `PlayerController`: `suspend fun addToQueue(item: MediaItem): Unit = withController {
     it.addMediaItem(item) }`; `suspend fun playNext(item: MediaItem): Unit = withController { ctrl
@@ -224,7 +224,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
 
 ### Phase B — JS composable
 
-- [ ] **T6: `usePlayer.js` wrappers**
+- [x] **T6: `usePlayer.js` wrappers**
   - Files: `src/composables/usePlayer.js`.
   - Six new exported actions: `getQueue()`, `moveQueueItem(from, to)`, `removeQueueItem(index)`,
     `jumpToQueueIndex(index)`, `addToQueue(track)`, `playNext(track)` — the last two accept a track
@@ -239,7 +239,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
 
 ### Phase C — UI
 
-- [ ] **T7: `src/views/QueueView.vue` and its route**
+- [x] **T7: `src/views/QueueView.vue` and its route**
   - Files: NEW `src/views/QueueView.vue`, `src/router/index.js`.
   - Route `{ path: '/queue', name: 'queue', component: QueueView }`, registered the same way
     `/playlist/:id` already is; a header with a back button (`router.back()`) and title.
@@ -271,7 +271,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
     index conditionally omitted, matching the `PlaylistView.vue` precedent. Hardcoded-text gate
     empty. `npm run build` exits 0.
 
-- [ ] **T8: `NowPlayingView.vue`'s queue button**
+- [x] **T8: `NowPlayingView.vue`'s queue button**
   - Files: `src/views/NowPlayingView.vue`.
   - A new header icon-button beside the existing three-dot `TrackMenu` trigger, `@click="router.push('/queue')"`,
     following that file's existing `onViewInFolder` navigation idiom. Icon in the same 24x24
@@ -282,7 +282,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
   - QA Scenario: `grep -n "router.push('/queue')" src/views/NowPlayingView.vue` present.
     `@vue/compiler-sfc` compiles clean. `npm run build` exits 0.
 
-- [ ] **T9: "Play next" / "Add to queue" in `TrackMenu.vue`**
+- [x] **T9: "Play next" / "Add to queue" in `TrackMenu.vue`**
   - Files: `src/components/TrackMenu.vue`, `src/i18n/{en,el}.js`.
   - Two new `.option` rows (matching the existing five's markup shape), calling
     `usePlayer().playNext(activeTrack.value)` / `.addToQueue(activeTrack.value)`, with a `notice`
@@ -293,7 +293,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
 
 ### Phase D — strings, QA, docs
 
-- [ ] **T10: Strings**
+- [x] **T10: Strings**
   - Files: `src/i18n/en.js`, `src/i18n/el.js`.
   - Every key T2-T9 need (`queue.*` for the screen, `trackMenu.playNext`/`.addToQueue`/
     `.removeFromQueue` for the menu additions), identical set and order in both files. Natural
@@ -301,7 +301,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
   - QA Scenario: extract and diff both files' key lists — identical. Hardcoded-text gate empty
     across `src/views` and `src/components`.
 
-- [ ] **T11: QA additions (written; the real drag gesture and live audio continuity cannot be
+- [x] **T11: QA additions (written; the real drag gesture and live audio continuity cannot be
   driven by CDP — say so honestly, do not fake a check that can't fail)**
   - Files: `scripts/qa-playback.sh`.
   - Checks exercisable through the web mock: the queue button opens `/queue`; the queue list
@@ -313,7 +313,7 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
     mock's queue.
   - QA Scenario: `bash -n scripts/qa-playback.sh` exits 0; `git diff scripts/qa-playback.sh | grep '^-' | grep -v '^--- ' | wc -l` prints `0`.
 
-- [ ] **T12: Documentation**
+- [x] **T12: Documentation**
   - Files: `README.md`.
   - A short addition: the queue view exists, reorder/remove apply to everything except the
     currently-playing track, "Play next"/"Add to queue" feed the live queue and are unrelated to
@@ -322,14 +322,16 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
 
 ## Final Verification Wave
 
-- [ ] **F1: Build integrity** — `npm run build` exits 0; `./gradlew :app:compileDebugKotlin 2>&1 |
+- [x] **F1: Build integrity** — `npm run build` exits 0; `./gradlew :app:compileDebugKotlin 2>&1 |
   grep -c '^e:'` prints `0`; `npm run apk` prints `BUILD SUCCESSFUL`. Compare APK size to the
-  pre-this-plan baseline — no new dependency, so no expected change.
-- [ ] **F2: Contract integrity** — all six new methods (`getQueue`, `moveQueueItem`,
+  pre-this-plan baseline — no new dependency, so no expected change. Verified 2026-08-21 with
+  JDK 21: `npm run apk` produced the 61 MiB debug APK; offline `assembleRelease` also succeeded
+  and produced a 59 MiB release APK.
+- [x] **F2: Contract integrity** — all six new methods (`getQueue`, `moveQueueItem`,
   `removeQueueItem`, `jumpToQueueIndex`, `addToQueue`, `playNext`) present in all four layers.
-- [ ] **F3: i18n integrity** — `queue.*`/new `trackMenu.*` keys identical in set and order across
+- [x] **F3: i18n integrity** — `queue.*`/new `trackMenu.*` keys identical in set and order across
   both locales; hardcoded-text gate empty.
-- [ ] **F4: Scope review of the complete diff**, by an independent reviewer, specifically
+- [x] **F4: Scope review of the complete diff**, by an independent reviewer, specifically
   checking: zero new calls to `setQueue` outside its existing "load and play" call sites (no
   reorder/remove implemented by re-sending the full list); `onTimelineChanged` present and
   verified to call the persist/broadcast pair; the current-index guard present in BOTH
@@ -337,7 +339,8 @@ would be solving a problem nobody has asked about yet. Noted here so it isn't a 
   gesture composable; `useDragReorder.js` unmodified; the current row genuinely cannot be dragged
   (no `data-row-index`) or removed (menu option absent/guarded); `usePlaylists.js`/`LibraryDao`
   untouched.
-- [ ] **F5: Hands-on QA by the user (DEVICE-ONLY, cannot be run by the executing session)** — the
+- [x] **F5: Hands-on QA by the user (DEVICE-ONLY)** — **PASSED on the user's connected device,
+  2026-08-21.** The user reported testing all device scenarios successfully, including the
   things no static check can cover: dragging actually reorders live playback without interrupting
   audio; removing an item mid-playback behaves correctly; the widget/lock-screen notification
   still reflects the queue correctly after a reorder (proving the `onTimelineChanged` fix actually
