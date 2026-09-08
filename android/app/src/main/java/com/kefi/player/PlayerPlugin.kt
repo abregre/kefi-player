@@ -168,6 +168,29 @@ class PlayerPlugin : Plugin() {
         call.resolve(AudioEffectsManager.snapshot(context).toJSObject())
     }
 
+    /**
+     * The per-track resume switch. A plain read/write pair with no player involvement on
+     * purpose: the setting has to be changeable at any time, including with nothing playing,
+     * and it is CONSUMED entirely inside PlaybackService — deliberately never asked for at
+     * playback time, because the whole point is that the feature works with no screen to ask
+     * on (a car head unit over Bluetooth).
+     */
+    @PluginMethod
+    fun getPlaybackSettings(call: PluginCall) {
+        call.resolve(JSObject().put("resumeTracks", ResumePointStore.isEnabled(context)))
+    }
+
+    @PluginMethod
+    fun setResumeTracksEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        ResumePointStore.setEnabled(context, enabled)
+        call.resolve(JSObject().put("resumeTracks", ResumePointStore.isEnabled(context)))
+    }
+
     @PluginMethod
     fun getPlayerState(call: PluginCall) {
         App.scope.launch {

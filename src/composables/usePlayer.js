@@ -1,4 +1,5 @@
 import { computed, readonly, ref, watch } from 'vue'
+import { App } from '@capacitor/app'
 import { Player } from '../plugins/player'
 
 /**
@@ -152,10 +153,20 @@ async function refreshState() {
 }
 
 /**
- * Attached exactly once for the app's lifetime. Every time the document
- * becomes visible again — including after the WebView itself was reclaimed
- * and rebuilt while backgrounded — pulls a fresh snapshot rather than trusting
- * the (possibly stale, possibly entirely absent) push history.
+ * Attached exactly once for the app's lifetime. Every time the app comes back to the
+ * foreground — including after the WebView itself was reclaimed and rebuilt while
+ * backgrounded — pulls a fresh snapshot rather than trusting the (possibly stale, possibly
+ * entirely absent) push history. This is the ONLY thing that can repair the UI after the
+ * user drove the player from somewhere else: a headset button, a car head unit, the media
+ * notification or the home-screen widget all change native state while the WebView is
+ * frozen and receiving nothing.
+ *
+ * BOTH hooks are needed, and `visibilitychange` alone is not enough — that was the bug.
+ * Android's WebView does not reliably fire `visibilitychange` when the Activity is merely
+ * stopped and resumed (as opposed to destroyed and rebuilt), so a plain background/
+ * foreground round trip left every screen rendering the state from before the user picked
+ * up their phone. Capacitor's `appStateChange` is driven by the Activity lifecycle itself
+ * and does fire. `refreshState` is a single idempotent read, so both firing is harmless.
  */
 function attachVisibilityHandler() {
   if (visibilityHandlerReady) return
@@ -165,6 +176,10 @@ function attachVisibilityHandler() {
     if (document.visibilityState === 'visible') {
       refreshState()
     }
+  })
+
+  App.addListener('appStateChange', ({ isActive }) => {
+    if (isActive) refreshState()
   })
 }
 
@@ -325,6 +340,15 @@ export function usePlayer() {
 
   /** @param {number} positionMs */
   async function seek(positionMs) {
+    // Rebase the local interpolation BEFORE the round trip, not after it. The seek bar drops
+    // its own drag state the instant the finger lifts, so between then and the native
+    // snapshot coming back over the bridge `displayPosition` would keep projecting from the
+    // OLD base — the thumb visibly snapped back to where the track was before the drag, then
+    // jumped forward again. The user asked for this position; render it immediately and let
+    // the snapshot below confirm it.
+    positionBase.value = positionMs
+    positionBasedAt = performance.now()
+    currentPosition.value = positionMs
     try {
       applySnapshot(await Player.seek({ positionMs }))
     } catch (err) {

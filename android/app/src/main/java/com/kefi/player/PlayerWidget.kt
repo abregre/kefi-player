@@ -19,9 +19,14 @@ import kotlinx.coroutines.withContext
  * Home-screen widget: current track, artwork, and previous / play-pause / next.
  *
  * It is a VIEW of the one player, never a second one. Nothing here owns playback state; it
- * renders whatever [PlayerController] last broadcast, falls back to [PlaybackStateStore]
+ * renders whatever [PlaybackService] last broadcast, falls back to [PlaybackStateStore]
  * when the process starts cold (a reboot, or after the service stopped), and sends every
  * command back through the same paths the notification uses.
+ *
+ * The broadcast comes from the SERVICE's player listener, not from [PlayerController]. That
+ * distinction is the whole fix for "I pressed next on the car stereo and the widget stayed on
+ * the old song": the controller only exists while a WebView does, so with the app closed
+ * nothing was left to tell this widget anything had changed.
  */
 class PlayerWidget : AppWidgetProvider() {
 
@@ -64,7 +69,7 @@ class PlayerWidget : AppWidgetProvider() {
         private const val ACTION_NEXT = "com.kefi.player.widget.NEXT"
         private const val ACTION_PREVIOUS = "com.kefi.player.widget.PREVIOUS"
 
-        /** Last state pushed by the controller, so a redraw never has to ask the player. */
+        /** Last state pushed by the service, so a redraw never has to ask the player. */
         @Volatile
         private var lastState: WidgetState? = null
 
@@ -82,7 +87,7 @@ class PlayerWidget : AppWidgetProvider() {
             val isPlaying: Boolean,
         )
 
-        /** Called from [PlayerController.broadcastState] on every real state change. */
+        /** Called from `PlaybackService`'s player listener on every real state change. */
         fun onPlayerState(context: Context, snapshot: PlayerController.Snapshot) {
             lastState = WidgetState(
                 title = snapshot.title,
@@ -93,6 +98,12 @@ class PlayerWidget : AppWidgetProvider() {
             refresh(context)
         }
 
+        /**
+         * Monotonic render ticket. Each [refresh] takes the next number and only draws if it
+         * is still the highest one by the time its artwork has been decoded — see [refresh].
+         */
+        private val renderSequence = java.util.concurrent.atomic.AtomicLong(0)
+
         /** Redraws every placed widget from the last known state. Safe to call anywhere. */
         fun refresh(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
@@ -100,10 +111,18 @@ class PlayerWidget : AppWidgetProvider() {
             // Nobody has placed the widget: not a single bitmap gets decoded.
             if (ids.isEmpty()) return
 
+            // Two state changes in quick succession (a track transition is exactly this: the
+            // timeline moves, then the metadata lands) start two independent coroutines, and
+            // artwork decoding makes them take wildly different amounts of time. Without a
+            // ticket the slower — older — one could finish last and paint the PREVIOUS track
+            // back over the current one, leaving the widget stuck on a song that already
+            // ended. Whoever is not the newest caller simply drops its frame.
+            val ticket = renderSequence.incrementAndGet()
             App.scope.launch {
                 val state = lastState ?: coldState(context)
                 val bitmap = artworkFor(context, state?.uri)
                 withContext(Dispatchers.Main) {
+                    if (ticket != renderSequence.get()) return@withContext
                     manager.updateAppWidget(ids, render(context, state, bitmap))
                 }
             }

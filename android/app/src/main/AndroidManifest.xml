@@ -100,6 +100,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        Declared explicitly even though a transitive dependency happens to merge it in today.
+        PlaybackService asks ExoPlayer for C.WAKE_MODE_LOCAL, and ExoPlayer's WakeLockManager
+        checks this permission at runtime: without it, it logs a warning and silently holds no
+        wake lock at all, so a long track can die mid-play once the device suspends with the
+        screen off. Relying on another library's manifest for that is a dependency bump away
+        from a silent regression.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

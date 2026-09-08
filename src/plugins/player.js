@@ -91,6 +91,11 @@ import { registerPlugin } from '@capacitor/core'
  * @property {(options: { levels: number[] }) => Promise<object>} setEqualizerBandLevels
  * @property {(options: { enabled: boolean }) => Promise<object>} setVolumeBoosterEnabled
  * @property {(options: { gainMb: number }) => Promise<object>} setVolumeBoosterGain
+ * @property {() => Promise<{ resumeTracks: boolean }>} getPlaybackSettings
+ *   Reads the per-track resume switch. Native-owned, because PlaybackService consumes it with
+ *   no WebView running.
+ * @property {(options: { enabled: boolean }) => Promise<{ resumeTracks: boolean }>} setResumeTracksEnabled
+ *   Turns per-track resume on or off. Turning it OFF also discards every stored resume point.
  * @property {() => Promise<{ tracks: PlayerTrack[] }>} listTracks
  *   Device-wide MediaStore query, on demand (no cache/database). Rejects with a message
  *   containing "permission" when the audio permission has not been granted.

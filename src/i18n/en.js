@@ -191,6 +191,11 @@ export default {
   'sound.equalizer.notReady': 'Start a track to load this device’s equalizer bands and presets.',
   'sound.booster.description': 'Boosts Kefi Player only. High gain may distort audio.',
   'sound.booster.notReady': 'Start a track to check whether this device supports volume boosting.',
+  'settings.playback': 'Playback',
+  'settings.playback.resume': 'Resume tracks where you left off',
+  'settings.playback.resume.hint':
+    'A track you stopped part-way through starts from that point next time, wherever you play it from — including a car stereo or headphones. Off means every track starts from the beginning.',
+
   'settings.widget': 'Home screen',
   'settings.widget.add': 'Add the player widget',
   'settings.widget.manual':

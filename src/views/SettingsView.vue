@@ -5,11 +5,20 @@ import { Player } from '../plugins/player'
 import { registerTap } from '../composables/useEasterEgg'
 import { useRouter } from 'vue-router'
 import { useSoundSettings } from '../composables/useSoundSettings'
+import { usePlaybackSettings } from '../composables/usePlaybackSettings'
 
 const { locale, t, setLocale } = useI18n()
 const router = useRouter()
 const { sound, load: loadSound } = useSoundSettings()
 loadSound()
+
+/*
+ * Read here and written here, never consulted at playback time. The native side decides on its
+ * own whether to resume a track, precisely so the decision can be made with no screen present —
+ * the user may well be starting that track from a car stereo with the phone in a pocket.
+ */
+const { resumeTracks, load: loadPlayback, setResumeTracks } = usePlaybackSettings()
+loadPlayback()
 
 /*
  * An app cannot place its own widget; it can only ASK the launcher to
@@ -59,6 +68,19 @@ async function addWidget() {
       <button type="button" class="option" @click="router.push('/settings/equalizer')"><span>{{ t('sound.equalizer') }}</span><span class="summary">{{ sound?.equalizer?.enabled ? t('sound.on') : t('sound.off') }} ›</span></button>
       <button type="button" class="option" @click="router.push('/settings/volume-booster')"><span>{{ t('sound.booster') }}</span><span class="summary">{{ sound?.volumeBooster?.enabled ? t('sound.on') : t('sound.off') }} ›</span></button>
     </div>
+
+    <h2 class="section-title">{{ t('settings.playback') }}</h2>
+    <div class="card">
+      <label class="option toggle">
+        <span>{{ t('settings.playback.resume') }}</span>
+        <input
+          type="checkbox"
+          :checked="resumeTracks"
+          @change="setResumeTracks($event.target.checked)"
+        >
+      </label>
+    </div>
+    <p class="note">{{ t('settings.playback.resume.hint') }}</p>
 
     <h2 class="section-title">{{ t('settings.widget') }}</h2>
     <div class="card">
@@ -152,6 +174,19 @@ async function addWidget() {
 .option.selected {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* The `.option` rows above are buttons; this one is a label wrapping a checkbox, so it needs
+   the pointer affordance and shrink protection a button gets for free. */
+.toggle {
+  gap: 0.9rem;
+}
+
+.toggle input {
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--accent);
 }
 
 .tick svg {

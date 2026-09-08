@@ -43,9 +43,12 @@ object PlaybackStateStore {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /**
-     * Called from [PlayerController]'s single `Player.Listener` every time
+     * Called from [PlaybackService]'s own `Player.Listener` every time
      * queue/index/playback-state/shuffle/repeat changes, plus a throttled heartbeat while
-     * playing (see `PlayerController.kt`). `SharedPreferences.Editor.apply()` commits to disk
+     * playing (see `PlaybackService.kt`). Deliberately NOT driven from [PlayerController]:
+     * that controller only exists while a WebView does, so persistence hung off it went stale
+     * the moment the app was closed — and the next cold service start then restored that stale
+     * queue, which is what made external next/previous appear to ignore the real queue. `SharedPreferences.Editor.apply()` commits to disk
      * asynchronously, so this is safe to call directly from the main thread.
      */
     fun save(

@@ -3,14 +3,10 @@ package com.kefi.player
 import android.content.ComponentName
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Timeline
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +14,6 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.FileNotFoundException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -98,25 +93,14 @@ object PlayerController {
 
     /**
      * Set by [PlayerPlugin][com.kefi.player] (T11) to receive skip-on-error notifications;
-     * invoked on [Dispatchers.Main] from [onPlayerError] below, once per failed item, with the
-     * failing item's `uri` (nullable — the item may have no `localConfiguration` in edge
-     * cases) and a short `reason` code. T7 forwards each call straight to Capacitor's
+     * invoked on [Dispatchers.Main] by `PlaybackService`'s player listener (which owns error
+     * recovery — it is the only observer that survives the app being closed), once per failed
+     * item, with the failing item's `uri` (nullable — the item may have no `localConfiguration`
+     * in edge cases) and a short `reason` code. T7 forwards each call straight to Capacitor's
      * `notifyListeners("trackUnavailable", ...)`. This is intentionally separate from
      * [onState]/[Snapshot] — the frozen 11-key snapshot contract is not touched by this event.
      */
     var onTrackUnavailable: ((uri: String?, reason: String) -> Unit)? = null
-
-    /**
-     * Bounds the skip-on-error loop (T11): incremented on every [onPlayerError], reset to 0
-     * the moment playback actually starts again ([onIsPlayingChanged] fires `true`). Guards
-     * against an all-broken queue looping forever — this would otherwise be a real risk under
-     * `Player.REPEAT_MODE_ALL`, where [MediaController.hasNextMediaItem] keeps reporting
-     * `true` by wrapping back to index 0 forever. Once this count reaches the queue length
-     * (every item has now failed once since the last success), the controller stops instead
-     * of attempting yet another skip.
-     */
-    @Volatile
-    private var consecutiveErrorCount = 0
 
     /**
      * Last `isPlaying` value seen by [listener] (or by a snapshot). Readable without a
@@ -128,169 +112,48 @@ object PlayerController {
     var lastKnownIsPlaying: Boolean = false
         private set
 
-    /**
-     * T12: throttled position-persistence heartbeat. Media3's `Player.Listener` never fires
-     * on a bare position tick (confirmed empirically in T8 — see the notepad's T8 entry, and
-     * confirmed again by decompiling `MediaControllerImplBase` for T12: the periodic
-     * position refresh Media3 already runs internally, `notifyPeriodicSessionPositionInfoChanged`,
-     * only updates the controller's own cached position silently and never invokes
-     * `Player.Listener`), so with zero periodic component the persisted position would only
-     * ever be as fresh as the last discrete transition — stale by however long a track has
-     * been playing uninterrupted. [startPositionHeartbeat]/[stopPositionHeartbeat] are
-     * started/stopped directly from [onIsPlayingChanged] below (an existing callback, not a
-     * new observer), and [POSITION_SAVE_INTERVAL_MS] is the same 5s figure the task caps
-     * position-write frequency at — this is that cap, not an additional unbounded loop.
-     */
+    /** [release] posts to the main thread; [MediaController] throws if touched off it. */
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val positionHeartbeat = object : Runnable {
-        override fun run() {
-            persistState()
-            mainHandler.postDelayed(this, POSITION_SAVE_INTERVAL_MS)
-        }
-    }
-
-    private fun startPositionHeartbeat() {
-        mainHandler.removeCallbacks(positionHeartbeat)
-        mainHandler.postDelayed(positionHeartbeat, POSITION_SAVE_INTERVAL_MS)
-    }
-
-    private fun stopPositionHeartbeat() {
-        mainHandler.removeCallbacks(positionHeartbeat)
-    }
 
     /**
-     * T12: writes queue/index/position/shuffle/repeat to [PlaybackStateStore]. Called from
-     * every [listener] branch that already calls [broadcastState] (so persisted state never
-     * lags the JS-facing snapshot) plus [positionHeartbeat] above. A no-op before any queue
-     * exists (nothing to persist yet). `SharedPreferences.Editor.apply()` commits
-     * asynchronously, so this is safe to call directly on the main thread.
+     * The JS bridge's view of playback, and NOTHING else.
+     *
+     * Persistence, the home-screen widget and skip/retry-on-error all used to hang off this
+     * listener too. They no longer do — they live on [PlaybackService]'s own player listener,
+     * because this controller is released the moment the Activity dies and all three must keep
+     * working with the app closed (see `PlaybackService.stateObserver` for the three
+     * device-reported bugs that came from getting this wrong). What is left here is genuinely
+     * WebView-only: with no WebView there is nobody to notify.
      */
-    private fun persistState() {
-        val ctrl = controller ?: return
-        val uris = (0 until ctrl.mediaItemCount).mapNotNull {
-            ctrl.getMediaItemAt(it).localConfiguration?.uri?.toString()
-        }
-        if (uris.isEmpty()) return
-        PlaybackStateStore.save(
-            context = App.instance,
-            uris = uris,
-            index = ctrl.currentMediaItemIndex,
-            positionMs = ctrl.currentPosition,
-            shuffle = ctrl.shuffleModeEnabled,
-            repeatMode = ctrl.repeatMode,
-        )
-    }
-
     private val listener = object : Player.Listener {
-        /**
-         * Queue edits (move/remove/insert) mutate Media3's timeline without necessarily
-         * changing playback state or the current item. Persist and broadcast here so the
-         * saved queue, widget, and any live WebView stay in sync with those mutations.
-         */
-        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-            persistState()
-            broadcastState()
-        }
-
-        override fun onIsPlayingChanged(isPlaying: Boolean) {
-            lastKnownIsPlaying = isPlaying
-            if (isPlaying) consecutiveErrorCount = 0
-            if (isPlaying) startPositionHeartbeat() else stopPositionHeartbeat()
-            persistState()
-            broadcastState()
-        }
-
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            persistState()
-            broadcastState()
-        }
-
-        /**
-         * The extractor reads a file's tags a beat AFTER playback starts, so the snapshot
-         * taken at start time reports a null title for any queue built from bare uris
-         * (`setQueue`, T10 — a `MediaItem` from a uri carries no metadata of its own).
-         * Without this branch the UI would keep showing that null until some unrelated
-         * event happened to fire. Broadcast only: nothing here changes what
-         * `persistState()` writes.
-         */
-        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-            broadcastState()
-        }
-
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            persistState()
-            broadcastState()
-        }
-
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-            persistState()
-            broadcastState()
-        }
-
-        override fun onRepeatModeChanged(repeatMode: Int) {
-            persistState()
-            broadcastState()
-        }
-
-        override fun onPlayerError(error: PlaybackException) {
-            val ctrl = controller ?: return
-            val failedUri = ctrl.currentMediaItem?.localConfiguration?.uri?.toString()
-            val reason = describeError(error)
-            Log.w(
-                "KefiApp",
-                "Track unavailable: uri=$failedUri reason=$reason errorCode=${error.errorCode} " +
-                    "errorCodeName=${error.errorCodeName} cause=${error.cause}",
-            )
-
-            consecutiveErrorCount++
-            if (consecutiveErrorCount < ctrl.mediaItemCount && ctrl.hasNextMediaItem()) {
-                // Skip past the failing item and try the next one. The player is in
-                // STATE_IDLE after an error, so seeking alone does not resume loading —
-                // prepare()+play() are required to actually attempt the next item.
-                ctrl.seekToNextMediaItem()
-                ctrl.prepare()
-                ctrl.play()
-            } else {
-                // Either there is no next item, or every item in the queue has now failed
-                // once since the last successful play (bounded by mediaItemCount) — stop
-                // instead of looping forever (relevant under REPEAT_MODE_ALL, where
-                // hasNextMediaItem() would otherwise keep wrapping around indefinitely).
-                consecutiveErrorCount = 0
-                ctrl.stop()
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (events.containsAny(
+                    Player.EVENT_TIMELINE_CHANGED,
+                    Player.EVENT_MEDIA_ITEM_TRANSITION,
+                    Player.EVENT_IS_PLAYING_CHANGED,
+                    Player.EVENT_PLAYBACK_STATE_CHANGED,
+                    Player.EVENT_POSITION_DISCONTINUITY,
+                    Player.EVENT_MEDIA_METADATA_CHANGED,
+                    Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED,
+                    Player.EVENT_REPEAT_MODE_CHANGED,
+                    Player.EVENT_PLAYER_ERROR,
+                )
+            ) {
+                broadcastState()
             }
-
-            onTrackUnavailable?.invoke(failedUri, reason)
-            persistState()
-            broadcastState()
         }
     }
-
-    /** T12: position-persistence heartbeat cap (see [positionHeartbeat] above). */
-    private const val POSITION_SAVE_INTERVAL_MS = 5_000L
 
     /**
-     * Media3 surfaces file-availability failures as a [PlaybackException] with a stable
-     * public [PlaybackException.errorCode]; that is checked first. [Throwable.cause] is
-     * inspected as a fallback in case a future Media3 version (or a different `DataSource`)
-     * throws the raw exception without setting a matching `errorCode`.
+     * Pushes a fresh snapshot to the WebView. The widget is deliberately NOT redrawn from
+     * here: it is driven by [PlaybackService], which is the only observer that outlives the
+     * app, and having two writers would make it flicker between two views of the same player.
      */
-    private fun describeError(error: PlaybackException): String = when {
-        error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-            error.cause is FileNotFoundException -> "file_not_found"
-        error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
-            error.cause is SecurityException -> "permission_denied"
-        else -> error.errorCodeName
-    }
-
     private fun broadcastState() {
         val current = controller ?: return
-        val snapshot = current.toSnapshot()
+        val snapshot = current.playbackSnapshot()
+        lastKnownIsPlaying = snapshot.isPlaying
         onState?.invoke(snapshot)
-        // The home-screen widget follows the same state changes the WebView does, and for
-        // the same reason: it is a second view of one player, not a second player. Cheap —
-        // this fires on state CHANGES only, and the widget bails immediately when no widget
-        // is placed.
-        PlayerWidget.onPlayerState(App.instance, snapshot)
     }
 
     /**
@@ -351,7 +214,6 @@ object PlayerController {
                 existing.release()
             }
             controller = null
-            stopPositionHeartbeat()
         }
     }
 
@@ -360,44 +222,10 @@ object PlayerController {
         return withContext(Dispatchers.Main) { block(ctrl) }
     }
 
-    private fun MediaController.toSnapshot(): Snapshot {
-        val item = currentMediaItem
-        val rawDuration = duration
-        lastKnownIsPlaying = isPlaying
-        // The CURRENT ITEM's own metadata first, the player's combined metadata second.
-        //
-        // Order matters and has bitten in both directions. Items used to be built from bare
-        // uris and carried no metadata at all, so the item alone reported null for every
-        // queue-driven track — hence reading the combined value. But the combined value is
-        // updated ASYNCHRONOUSLY, one beat after the current item changes, so with items that
-        // DO carry metadata (TrackSource.mediaItemsFor) it briefly reports the PREVIOUS
-        // track: a snapshot taken right after setQueue returned the last-played title next to
-        // the new mediaId. The item is always in sync with mediaId, so it leads; combined
-        // stays as the fallback for anything MediaStore does not know (a file:// uri), where
-        // the extractor is the only source of a title.
-        val combined = mediaMetadata
-        return Snapshot(
-            mediaId = item?.mediaId?.takeIf { it.isNotEmpty() },
-            uri = item?.localConfiguration?.uri?.toString(),
-            title = (item?.mediaMetadata?.title ?: combined.title)?.toString(),
-            artist = (
-                item?.mediaMetadata?.artist
-                    ?: item?.mediaMetadata?.albumArtist
-                    ?: combined.artist
-                    ?: combined.albumArtist
-                )?.toString(),
-            currentPosition = currentPosition,
-            duration = if (rawDuration == C.TIME_UNSET) 0L else rawDuration,
-            isPlaying = isPlaying,
-            shuffleModeEnabled = shuffleModeEnabled,
-            repeatMode = repeatMode,
-            queueLength = mediaItemCount,
-            currentIndex = currentMediaItemIndex,
-        )
-    }
-
     /** Live snapshot of the controller's current state — never a cached value. */
-    suspend fun snapshot(): Snapshot = withController { it.toSnapshot() }
+    suspend fun snapshot(): Snapshot = withController {
+        it.playbackSnapshot().also { snap -> lastKnownIsPlaying = snap.isPlaying }
+    }
 
     /** Reads the queue and current position atomically on the controller's owning thread. */
     suspend fun getQueue(): QueueSnapshot = withController { ctrl ->
