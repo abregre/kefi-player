@@ -1,5 +1,6 @@
 package com.kefi.player
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
@@ -13,8 +14,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -22,10 +23,19 @@ import java.io.FileNotFoundException
 
 /**
  * Owns the single [ExoPlayer] + [MediaSession] pair for the whole app. Media3's
- * [MediaSessionService] base class handles the foreground-service lifecycle, the
+ * [MediaLibraryService] base class handles the foreground-service lifecycle, the
  * media-style notification (via [DefaultMediaNotificationProvider]) and media-button
  * routing; this class builds the player/session, wires the notification channel, and owns
  * [stateObserver] — the app's only observer of playback that outlives the WebView.
+ *
+ * [MediaLibraryService] rather than the plainer `MediaSessionService` it started as. The two
+ * are identical for everything that talks to the live session — notification, lock screen,
+ * a Bluetooth headset's AVRCP buttons, all of which already worked — but only the library
+ * variant publishes the `MediaBrowserService` a car front-end connects to. Honda RoadSync on
+ * the bike showed the current track and had dead play/pause and next buttons purely because
+ * there was no browser to send them to (reported 2026-09-19). [MediaBrowseTree] is the
+ * callback that serves that side; the manifest carries the matching second intent-filter
+ * action and the `com.google.android.gms.car.application` descriptor.
  *
  * [onTaskRemoved] IS overridden, contrary to the plan's original Must Have — see the
  * method for the device-reported bug that forced it. The override keeps upstream's decision
@@ -34,7 +44,7 @@ import java.io.FileNotFoundException
  * `stopSelf()` can never take effect.
  */
 @OptIn(UnstableApi::class)
-class PlaybackService : MediaSessionService() {
+class PlaybackService : MediaLibraryService() {
 
     private companion object {
         /** See the [setForegroundServiceTimeoutMs] call in [onCreate]. */
@@ -52,7 +62,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private var player: ExoPlayer? = null
-    private var session: MediaSession? = null
+    private var session: MediaLibrarySession? = null
 
     /**
      * Android insert effects bind to one audio session, not to ExoPlayer permanently. The player
@@ -366,7 +376,21 @@ class PlaybackService : MediaSessionService() {
         exoPlayer.addListener(stateObserver)
         AudioEffectsManager.attach(applicationContext, exoPlayer.audioSessionId)
 
-        val mediaSession = MediaSession.Builder(this, exoPlayer).build()
+        val mediaSession = MediaLibrarySession.Builder(this, exoPlayer, MediaBrowseTree(this))
+            // Gives a car front-end (and the notification) something to open when the user
+            // taps the track title rather than a button. Without it the head unit's "open
+            // app" affordance is dead, which reads as another broken control.
+            .setSessionActivity(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, MainActivity::class.java)
+                        .setAction(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_LAUNCHER),
+                    PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            .build()
         session = mediaSession
         // Without this, the base class never wires this session into its internal
         // notification/foreground-service manager — the player will happily play
@@ -439,7 +463,8 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
+        session
 
     /**
      * The user swiped the app away. Upstream's default is

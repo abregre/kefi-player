@@ -7,4 +7,7 @@
     <string name="widget_pause">Παύση</string>
     <string name="widget_next">Επόμενο</string>
     <string name="widget_previous">Προηγούμενο</string>
+    <string name="browse_all_tracks">Όλα τα τραγούδια</string>
+    <string name="browse_favorites">Αγαπημένα</string>
+    <string name="browse_playlists">Λίστες</string>
 </resources>

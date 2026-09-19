@@ -46,6 +46,11 @@
 
         </activity-alias>
 
+        <!-- See res/xml/automotive_app_desc.xml for what reads this and why. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -60,8 +65,17 @@
             android:name=".PlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
+            <!--
+                TWO actions, not one. MediaSessionService is what this app's own
+                PlayerController binds to. MediaBrowserService is what a car front-end
+                (Android Auto, Honda RoadSync) looks for when it enumerates media apps: it
+                does not drive whatever session happens to be active, it connects to a
+                browser and sends its play/pause/next down that connection. With only the
+                first action the bike showed the track and its buttons did nothing.
+            -->
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

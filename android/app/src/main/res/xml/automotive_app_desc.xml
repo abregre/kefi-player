@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Declares Kefi Player as a media app to car front-ends. Android Auto and the head-unit
+    apps built on it (Honda RoadSync among them) read this descriptor through the
+    `com.google.android.gms.car.application` meta-data in the manifest to decide whether an
+    app is a media app worth connecting to as a browser; without it they can still read the
+    active session's metadata for display, but their transport buttons have nothing to talk
+    to. That was the bike bug: player visible, play/pause and next dead.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

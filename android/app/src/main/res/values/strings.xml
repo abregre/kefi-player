@@ -14,4 +14,10 @@
     <string name="widget_pause">Pause</string>
     <string name="widget_next">Next track</string>
     <string name="widget_previous">Previous track</string>
+    <!-- Browse-tree labels. Like the widget strings above, these follow the DEVICE
+         locale rather than the app's language setting: a car head unit renders them and
+         cannot ask the app which language the user picked. values-el/ carries the Greek. -->
+    <string name="browse_all_tracks">All tracks</string>
+    <string name="browse_favorites">Favorites</string>
+    <string name="browse_playlists">Playlists</string>
 </resources>
