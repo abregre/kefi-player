@@ -1054,7 +1054,15 @@ class PlayerPlugin : Plugin() {
 
     companion object {
         fun setShareTargetEnabled(context: Context, enabled: Boolean) {
-            val comp = ComponentName(context, "${context.packageName}.ShareTarget")
+            // The class name here is the gradle `namespace`, not the applicationId: they
+            // coincide in the `standard` flavor but diverge in `roadsync` (applicationId
+            // `com.shaiban.audioplayer.mplayer`), where the alias still compiles as
+            // `com.kefi.player.ShareTarget` because `namespace` stays `com.kefi.player` for
+            // every flavor. Building the class from `context.packageName` asks PackageManager
+            // to enable a component that does not exist and crashes App.onCreate on launch.
+            // `ComponentName(context, String)` already resolves the package from
+            // `context.packageName`, so only the class string needs to be namespace-fixed.
+            val comp = ComponentName(context, "com.kefi.player.ShareTarget")
             val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                         else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             context.packageManager.setComponentEnabledSetting(comp, state, PackageManager.DONT_KILL_APP)

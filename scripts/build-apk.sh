@@ -4,16 +4,32 @@
 # Usage:
 #   scripts/build-apk.sh            # debug APK
 #   scripts/build-apk.sh release    # release APK (needs android/keystore.properties)
+#   scripts/build-apk.sh debug roadsync   # debug APK under the RoadSync-allowlisted package id
 #   ABIS=arm64-v8a,x86_64 scripts/build-apk.sh   # restrict native ABIs
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 VARIANT="${1:-debug}"
+FLAVOR="${2:-standard}"
 # Empty by default: this app has no native payload of its own, so every ABI
 # Android supports is served by the same bundle and filtering saves nothing.
 # Set ABIS only once a native library with per-ABI .so files is added.
 ABIS="${ABIS:-}"
+
+case "$VARIANT" in
+  debug|release) ;;
+  *) echo "Unknown variant '$VARIANT' (expected debug or release)" >&2; exit 1 ;;
+esac
+
+case "$FLAVOR" in
+  standard|roadsync) ;;
+  *) echo "Unknown flavor '$FLAVOR'. Pass 'standard' or 'roadsync' as the second argument and re-run." >&2; exit 1 ;;
+esac
+
+FLAVOR_CAP="$(tr '[:lower:]' '[:upper:]' <<<"${FLAVOR:0:1}")${FLAVOR:1}"
+VARIANT_CAP="$(tr '[:lower:]' '[:upper:]' <<<"${VARIANT:0:1}")${VARIANT:1}"
+GRADLE_TASK=":app:assemble${FLAVOR_CAP}${VARIANT_CAP}"
 
 # This machine's global JAVA_HOME points at a JDK that is no longer installed,
 # so resolve a usable JDK 17+ ourselves instead of trusting the environment.
@@ -54,6 +70,7 @@ echo "JDK:         $JAVA_HOME"
 echo "Android SDK: $ANDROID_HOME"
 echo "ABIs:        ${ABIS:-all}"
 echo "Variant:     $VARIANT"
+echo "Flavor:      $FLAVOR"
 echo
 
 npm run build
@@ -62,18 +79,12 @@ npm run build
 npm run build:potoken
 npx cap sync android
 
-case "$VARIANT" in
-  debug)   GRADLE_TASK=":app:assembleDebug" ;;
-  release) GRADLE_TASK=":app:assembleRelease" ;;
-  *) echo "Unknown variant '$VARIANT' (expected debug or release)" >&2; exit 1 ;;
-esac
-
 GRADLE_ARGS=("$GRADLE_TASK")
 [[ -n "$ABIS" ]] && GRADLE_ARGS+=("-PabiFilters=$ABIS")
 
 (cd android && ./gradlew "${GRADLE_ARGS[@]}")
 
-APK=$(find "android/app/build/outputs/apk/$VARIANT" -name "*.apk" -print -quit)
+APK=$(find "android/app/build/outputs/apk/$FLAVOR/$VARIANT" -name "*.apk" -print -quit)
 echo
 echo "APK: $APK"
 du -h "$APK" | cut -f1 | sed 's/^/Size: /'

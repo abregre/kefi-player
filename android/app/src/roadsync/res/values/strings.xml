@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!--
+        Overrides main/res/values/strings.xml:3-4 for this flavor only. A flavor source set
+        is used rather than `resValue "string", "app_name", ...` in build.gradle, because
+        app_name already exists in the main source set and resValue would collide with it
+        as a duplicate resource.
+    -->
+    <string name="app_name">Kefi (RoadSync)</string>
+    <string name="title_activity_main">Kefi (RoadSync)</string>
+</resources>
