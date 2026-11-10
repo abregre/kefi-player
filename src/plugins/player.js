@@ -64,6 +64,13 @@ import { registerPlugin } from '@capacitor/core'
  */
 
 /**
+ * @typedef {Object} PlaybackSettings
+ * @property {boolean} resumeTracks
+ * @property {boolean} continuePlaylists
+ * @property {boolean} controlsNotification
+ */
+
+/**
  * @typedef {Object} PlayerPlugin
  * @property {() => Promise<PlayerSnapshot>} getPlayerState
  *   Always a live read off the native controller — never a cached value.
@@ -71,7 +78,7 @@ import { registerPlugin } from '@capacitor/core'
  * @property {() => Promise<PlayerSnapshot>} pause
  * @property {() => Promise<PlayerSnapshot>} resume
  * @property {(options: { positionMs: number }) => Promise<PlayerSnapshot>} seek
- * @property {(options: { uris: string[], startIndex?: number }) => Promise<PlayerSnapshot>} setQueue
+ * @property {(options: { uris: string[], startIndex?: number, playlistId?: number }) => Promise<PlayerSnapshot>} setQueue
  *   Replaces the whole queue and starts playback at `startIndex` (default 0).
  * @property {() => Promise<{ items: QueueEntry[], currentIndex: number }>} getQueue
  * @property {(options: { from: number, to: number }) => Promise<PlayerSnapshot>} moveQueueItem
@@ -98,11 +105,13 @@ import { registerPlugin } from '@capacitor/core'
  * @property {(options: { levels: number[] }) => Promise<object>} setEqualizerBandLevels
  * @property {(options: { enabled: boolean }) => Promise<object>} setVolumeBoosterEnabled
  * @property {(options: { gainMb: number }) => Promise<object>} setVolumeBoosterGain
- * @property {() => Promise<{ resumeTracks: boolean }>} getPlaybackSettings
+ * @property {() => Promise<PlaybackSettings>} getPlaybackSettings
  *   Reads the per-track resume switch. Native-owned, because PlaybackService consumes it with
  *   no WebView running.
- * @property {(options: { enabled: boolean }) => Promise<{ resumeTracks: boolean }>} setResumeTracksEnabled
+ * @property {(options: { enabled: boolean }) => Promise<PlaybackSettings>} setResumeTracksEnabled
  *   Turns per-track resume on or off. Turning it OFF also discards every stored resume point.
+ * @property {(options: { enabled: boolean }) => Promise<PlaybackSettings>} setContinuePlaylistsEnabled
+ * @property {(options: { enabled: boolean }) => Promise<PlaybackSettings>} setControlsNotificationEnabled
  * @property {() => Promise<{ tracks: PlayerTrack[] }>} listTracks
  *   Device-wide MediaStore query, on demand (no cache/database). Rejects with a message
  *   containing "permission" when the audio permission has not been granted.

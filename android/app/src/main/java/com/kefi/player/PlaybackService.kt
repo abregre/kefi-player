@@ -123,6 +123,11 @@ class PlaybackService : MediaLibraryService() {
             ) {
                 persistState(player)
                 publishWidgetState(player)
+                if (events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) &&
+                    player.playbackState == Player.STATE_ENDED
+                ) {
+                    continueToNextPlaylist()
+                }
             } else if (events.contains(Player.EVENT_MEDIA_METADATA_CHANGED)) {
                 // The extractor reads a file's tags a beat AFTER playback starts, so a title
                 // can arrive on its own. Nothing worth persisting changed — redraw only.
@@ -329,7 +334,36 @@ class PlaybackService : MediaLibraryService() {
      * immediately when none is placed.
      */
     private fun publishWidgetState(target: Player) {
-        PlayerWidget.onPlayerState(applicationContext, target.playbackSnapshot())
+        val snapshot = target.playbackSnapshot()
+        PlayerWidget.onPlayerState(applicationContext, snapshot)
+        ControlsNotification.onPlayerState(applicationContext, snapshot)
+    }
+
+    private fun continueToNextPlaylist() {
+        val current = player ?: return
+        if (current.repeatMode != Player.REPEAT_MODE_OFF || current.mediaItemCount == 0) return
+        if (!PlaylistContinuation.isEnabled(applicationContext)) return
+        val sourceId = PlaylistContinuation.sourcePlaylistId(applicationContext) ?: return
+        val endedUris = current.queueUris()
+        App.scope.launch {
+            val next = try {
+                PlaylistContinuation.nextQueue(applicationContext, sourceId)
+            } catch (t: Throwable) {
+                Log.w("KefiApp", "Could not load the next playlist", t)
+                null
+            } ?: return@launch
+            withContext(Dispatchers.Main) {
+                val target = player ?: return@withContext
+                if (target.playbackState != Player.STATE_ENDED || target.queueUris() != endedUris) {
+                    return@withContext
+                }
+                Log.i("KefiApp", "Playlist $sourceId ended, continuing with playlist ${next.first}")
+                PlaylistContinuation.setSourcePlaylistId(applicationContext, next.first)
+                target.setMediaItems(next.second, 0, C.TIME_UNSET)
+                target.prepare()
+                target.play()
+            }
+        }
     }
 
     /**
@@ -531,6 +565,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        ControlsNotification.onServiceDestroyed(applicationContext)
         stopPositionHeartbeat()
         player?.let { sampleResumePoint(it) }
         commitResumePoint()

@@ -72,6 +72,9 @@ class MediaBrowseTree(private val context: Context) : MediaLibrarySession.Callba
     @Volatile
     private var lastBrowsedUris: List<String> = emptyList()
 
+    @Volatile
+    private var lastBrowsedPlaylistId: Long? = null
+
     private fun dao() = LibraryDatabase.getInstance(context).libraryDao()
 
     // ---- Connection ------------------------------------------------------
@@ -153,7 +156,7 @@ class MediaBrowseTree(private val context: Context) : MediaLibrarySession.Callba
                 if (id == null) {
                     emptyList()
                 } else {
-                    tracksForPaths(dao().listPlaylistPaths(id)).also { rememberBrowsed(it) }
+                    tracksForPaths(dao().listPlaylistPaths(id)).also { rememberBrowsed(it, id) }
                 }
             }
 
@@ -210,6 +213,7 @@ class MediaBrowseTree(private val context: Context) : MediaLibrarySession.Callba
         startPositionMs: Long,
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
         val browsed = lastBrowsedUris
+        val browsedPlaylistId = lastBrowsedPlaylistId
         val tappedId = mediaItems.singleOrNull()?.mediaId
         val indexInBrowsed = if (tappedId == null) -1 else browsed.indexOf(tappedId)
         if (indexInBrowsed < 0) {
@@ -222,6 +226,7 @@ class MediaBrowseTree(private val context: Context) : MediaLibrarySession.Callba
         App.scope.launch {
             try {
                 val items = TrackSource.mediaItemsFor(context, browsed)
+                PlaylistContinuation.setSourcePlaylistId(context, browsedPlaylistId)
                 future.set(
                     MediaSession.MediaItemsWithStartPosition(
                         items, indexInBrowsed, startPositionMs,
@@ -265,8 +270,9 @@ class MediaBrowseTree(private val context: Context) : MediaLibrarySession.Callba
 
     // ---- Helpers ---------------------------------------------------------
 
-    private fun rememberBrowsed(items: List<MediaItem>) {
+    private fun rememberBrowsed(items: List<MediaItem>, playlistId: Long? = null) {
         lastBrowsedUris = items.map { it.mediaId }
+        lastBrowsedPlaylistId = playlistId
     }
 
     /**

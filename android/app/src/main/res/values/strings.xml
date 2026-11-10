@@ -5,6 +5,7 @@
     <string name="package_name">com.kefi.player</string>
     <string name="custom_url_scheme">com.kefi.player</string>
     <string name="playback_channel_name">Now playing</string>
+    <string name="controls_channel_name">Player controls</string>
     <!-- Widget strings follow the DEVICE locale, not the app's language setting: the
          launcher renders them, and it has no way to ask the app which language the user
          picked in Settings. values-el/ carries the Greek. -->

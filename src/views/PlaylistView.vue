@@ -247,7 +247,11 @@ function onViewInFolder(track) {
 function playFrom(track) {
   const list = displayTracks.value
   const startIndex = list.findIndex((candidate) => candidate.id === track.id)
-  player.setQueue({ uris: list.map((item) => item.uri), startIndex: Math.max(0, startIndex) })
+  player.setQueue({
+    uris: list.map((item) => item.uri),
+    startIndex: Math.max(0, startIndex),
+    playlistId: kind.value === 'user' ? numericId.value : undefined,
+  })
 }
 
 const renaming = ref(false)

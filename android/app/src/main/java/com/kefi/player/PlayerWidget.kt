@@ -66,8 +66,8 @@ class PlayerWidget : AppWidgetProvider() {
     }
 
     companion object {
-        private const val ACTION_NEXT = "com.kefi.player.widget.NEXT"
-        private const val ACTION_PREVIOUS = "com.kefi.player.widget.PREVIOUS"
+        internal const val ACTION_NEXT = "com.kefi.player.widget.NEXT"
+        internal const val ACTION_PREVIOUS = "com.kefi.player.widget.PREVIOUS"
 
         /** Last state pushed by the service, so a redraw never has to ask the player. */
         @Volatile
@@ -200,7 +200,7 @@ class PlayerWidget : AppWidgetProvider() {
         private const val REQUEST_NEXT = 3
         private const val REQUEST_PREVIOUS = 4
 
-        private fun openApp(context: Context): PendingIntent {
+        internal fun openApp(context: Context): PendingIntent {
             val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
                 ?: Intent(context, MainActivity::class.java)
             return PendingIntent.getActivity(
@@ -211,7 +211,7 @@ class PlayerWidget : AppWidgetProvider() {
             )
         }
 
-        private fun mediaButton(context: Context, keyCode: Int, requestCode: Int): PendingIntent {
+        internal fun mediaButton(context: Context, keyCode: Int, requestCode: Int): PendingIntent {
             val intent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
                 component = ComponentName(context, MediaButtonReceiver::class.java)
                 putExtra(Intent.EXTRA_KEY_EVENT, KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
@@ -224,7 +224,7 @@ class PlayerWidget : AppWidgetProvider() {
             )
         }
 
-        private fun command(context: Context, action: String, requestCode: Int): PendingIntent {
+        internal fun command(context: Context, action: String, requestCode: Int): PendingIntent {
             val intent = Intent(context, PlayerWidget::class.java).setAction(action)
             return PendingIntent.getBroadcast(
                 context,

@@ -212,6 +212,11 @@ export default {
   'settings.playback.resume.hint':
     'Ένα τραγούδι που σταμάτησες στη μέση ξεκινά την επόμενη φορά από εκείνο το σημείο, από όπου κι αν το παίξεις — και από ηχοσύστημα αυτοκινήτου ή ακουστικά. Ανενεργό σημαίνει ότι κάθε τραγούδι ξεκινά από την αρχή.',
 
+  'settings.playback.continue': 'Συνέχεια στην επόμενη playlist',
+  'settings.playback.continue.hint': 'Όταν τελειώνει μια playlist, ξεκινά η επόμενη. Μετά την τελευταία, πάλι η πρώτη.',
+  'settings.playback.notification': 'Χειριστήρια στις ειδοποιήσεις',
+  'settings.playback.notification.hint': 'Μεγάλα κουμπιά play, προηγούμενο και επόμενο στη λίστα ειδοποιήσεων.',
+
   'settings.widget': 'Αρχική οθόνη',
   'settings.widget.add': 'Προσθήκη widget',
   'settings.widget.manual':

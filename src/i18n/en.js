@@ -210,6 +210,11 @@ export default {
   'settings.playback.resume.hint':
     'A track you stopped part-way through starts from that point next time, wherever you play it from — including a car stereo or headphones. Off means every track starts from the beginning.',
 
+  'settings.playback.continue': 'Continue to the next playlist',
+  'settings.playback.continue.hint': 'When a playlist ends, the next one starts. After the last, back to the first.',
+  'settings.playback.notification': 'Controls in notifications',
+  'settings.playback.notification.hint': 'Large play, previous and next buttons in the notification list.',
+
   'settings.widget': 'Home screen',
   'settings.widget.add': 'Add the player widget',
   'settings.widget.manual':

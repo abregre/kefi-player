@@ -48,6 +48,7 @@ import org.json.JSONObject
     permissions = [
         Permission(alias = "audio", strings = [Manifest.permission.READ_MEDIA_AUDIO]),
         Permission(alias = "audioLegacy", strings = [Manifest.permission.READ_EXTERNAL_STORAGE]),
+        Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]),
     ],
 )
 class PlayerPlugin : Plugin() {
@@ -177,7 +178,47 @@ class PlayerPlugin : Plugin() {
      */
     @PluginMethod
     fun getPlaybackSettings(call: PluginCall) {
-        call.resolve(JSObject().put("resumeTracks", ResumePointStore.isEnabled(context)))
+        call.resolve(playbackSettings())
+    }
+
+    private fun playbackSettings(): JSObject = JSObject()
+        .put("resumeTracks", ResumePointStore.isEnabled(context))
+        .put("continuePlaylists", PlaylistContinuation.isEnabled(context))
+        .put(
+            "controlsNotification",
+            ControlsNotification.isEnabled(context) && ControlsNotification.canPost(context),
+        )
+
+    @PluginMethod
+    fun setContinuePlaylistsEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        PlaylistContinuation.setEnabled(context, enabled)
+        call.resolve(playbackSettings())
+    }
+
+    @PluginMethod
+    fun setControlsNotificationEnabled(call: PluginCall) {
+        val enabled = call.getBoolean("enabled")
+        if (enabled == null) {
+            call.reject("An enabled boolean is required")
+            return
+        }
+        if (enabled && !ControlsNotification.canPost(context)) {
+            requestPermissionForAlias("notifications", call, "notificationsPermissionCallback")
+            return
+        }
+        ControlsNotification.setEnabled(context, enabled)
+        call.resolve(playbackSettings())
+    }
+
+    @PermissionCallback
+    private fun notificationsPermissionCallback(call: PluginCall) {
+        ControlsNotification.setEnabled(context, ControlsNotification.canPost(context))
+        call.resolve(playbackSettings())
     }
 
     @PluginMethod
@@ -188,7 +229,7 @@ class PlayerPlugin : Plugin() {
             return
         }
         ResumePointStore.setEnabled(context, enabled)
-        call.resolve(JSObject().put("resumeTracks", ResumePointStore.isEnabled(context)))
+        call.resolve(playbackSettings())
     }
 
     @PluginMethod
@@ -233,6 +274,7 @@ class PlayerPlugin : Plugin() {
                         )
                         .build()
                 }
+                PlaylistContinuation.setSourcePlaylistId(context, null)
                 PlayerController.play(item)
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {
@@ -298,6 +340,7 @@ class PlayerPlugin : Plugin() {
         // with a default is correct here, unlike positionMs/trackId above which are boxed
         // ambiguously by org.json but still need Long on the Kotlin side.
         val startIndex = call.getInt("startIndex", 0) ?: 0
+        val playlistId = call.getLong("playlistId") ?: call.getInt("playlistId")?.toLong()
 
         App.scope.launch {
             try {
@@ -309,6 +352,7 @@ class PlayerPlugin : Plugin() {
                     context,
                     (0 until uris.length()).map { uris.getString(it) },
                 )
+                PlaylistContinuation.setSourcePlaylistId(context, playlistId)
                 PlayerController.setQueue(items, startIndex)
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {
@@ -392,6 +436,7 @@ class PlayerPlugin : Plugin() {
     fun clearQueue(call: PluginCall) {
         App.scope.launch {
             try {
+                PlaylistContinuation.setSourcePlaylistId(context, null)
                 PlayerController.clearQueue()
                 call.resolve(PlayerController.snapshot().toJSObject())
             } catch (t: Throwable) {

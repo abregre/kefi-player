@@ -225,7 +225,7 @@ export function usePlayer() {
    * Replaces the whole queue and starts at `startIndex` (T15: the tapped row, with
    * the full VISIBLE list behind it, so a search result plays in the order the user
    * is looking at).
-   * @param {{ uris: string[], startIndex?: number }} options
+   * @param {{ uris: string[], startIndex?: number, playlistId?: number }} options
    */
   async function setQueue(options) {
     try {

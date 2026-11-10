@@ -17,7 +17,15 @@ loadSound()
  * own whether to resume a track, precisely so the decision can be made with no screen present —
  * the user may well be starting that track from a car stereo with the phone in a pocket.
  */
-const { resumeTracks, load: loadPlayback, setResumeTracks } = usePlaybackSettings()
+const {
+  resumeTracks,
+  continuePlaylists,
+  controlsNotification,
+  load: loadPlayback,
+  setResumeTracks,
+  setContinuePlaylists,
+  setControlsNotification,
+} = usePlaybackSettings()
 loadPlayback()
 
 /*
@@ -81,6 +89,28 @@ async function addWidget() {
       </label>
     </div>
     <p class="note">{{ t('settings.playback.resume.hint') }}</p>
+    <div class="card">
+      <label class="option toggle">
+        <span>{{ t('settings.playback.continue') }}</span>
+        <input
+          type="checkbox"
+          :checked="continuePlaylists"
+          @change="setContinuePlaylists($event.target.checked)"
+        >
+      </label>
+    </div>
+    <p class="note">{{ t('settings.playback.continue.hint') }}</p>
+    <div class="card">
+      <label class="option toggle">
+        <span>{{ t('settings.playback.notification') }}</span>
+        <input
+          type="checkbox"
+          :checked="controlsNotification"
+          @change="setControlsNotification($event.target.checked)"
+        >
+      </label>
+    </div>
+    <p class="note">{{ t('settings.playback.notification.hint') }}</p>
 
     <h2 class="section-title">{{ t('settings.widget') }}</h2>
     <div class="card">

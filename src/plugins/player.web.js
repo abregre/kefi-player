@@ -290,8 +290,18 @@ export class PlayerWeb extends WebPlugin {
 
   /** Mirrors the native switch's default (on) so `npm run dev` renders the real initial state. */
   resumeTracks = true
-  async getPlaybackSettings() { return { resumeTracks: this.resumeTracks } }
+  continuePlaylists = true
+  controlsNotification = false
+  async getPlaybackSettings() {
+    return {
+      resumeTracks: this.resumeTracks,
+      continuePlaylists: this.continuePlaylists,
+      controlsNotification: this.controlsNotification,
+    }
+  }
   async setResumeTracksEnabled({ enabled }) { this.resumeTracks = enabled; return this.getPlaybackSettings() }
+  async setContinuePlaylistsEnabled({ enabled }) { this.continuePlaylists = enabled; return this.getPlaybackSettings() }
+  async setControlsNotificationEnabled({ enabled }) { this.controlsNotification = enabled; return this.getPlaybackSettings() }
 
   async getSoundSettings() { return structuredClone(this.sound) }
   async setEqualizerEnabled({ enabled }) { this.sound.equalizer.enabled = enabled; return this.getSoundSettings() }
