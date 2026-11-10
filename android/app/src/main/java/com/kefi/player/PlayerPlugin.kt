@@ -389,6 +389,35 @@ class PlayerPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun clearQueue(call: PluginCall) {
+        App.scope.launch {
+            try {
+                PlayerController.clearQueue()
+                call.resolve(PlayerController.snapshot().toJSObject())
+            } catch (t: Throwable) {
+                call.rejectWith("Could not clear queue: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
+     * Resolves the usual snapshot plus `removed`: the caller needs to know whether anything
+     * actually went, because the snapshot alone cannot say — `queueLength` shrinking is
+     * indistinguishable from any other concurrent queue edit.
+     */
+    @PluginMethod
+    fun clearPlayedQueueItems(call: PluginCall) {
+        App.scope.launch {
+            try {
+                val removed = PlayerController.clearPlayedQueueItems()
+                call.resolve(PlayerController.snapshot().toJSObject().put("removed", removed))
+            } catch (t: Throwable) {
+                call.rejectWith("Could not clear played queue items: ${t.message}", t)
+            }
+        }
+    }
+
+    @PluginMethod
     fun jumpToQueueIndex(call: PluginCall) {
         val index = call.getInt("index")
         if (index == null) {
@@ -1054,14 +1083,13 @@ class PlayerPlugin : Plugin() {
 
     companion object {
         fun setShareTargetEnabled(context: Context, enabled: Boolean) {
-            // The class name here is the gradle `namespace`, not the applicationId: they
-            // coincide in the `standard` flavor but diverge in `roadsync` (applicationId
-            // `com.shaiban.audioplayer.mplayer`), where the alias still compiles as
-            // `com.kefi.player.ShareTarget` because `namespace` stays `com.kefi.player` for
-            // every flavor. Building the class from `context.packageName` asks PackageManager
-            // to enable a component that does not exist and crashes App.onCreate on launch.
-            // `ComponentName(context, String)` already resolves the package from
-            // `context.packageName`, so only the class string needs to be namespace-fixed.
+            // The class name here is the gradle `namespace`, not the applicationId. They
+            // happen to be the same string today, but they are different settings, and
+            // building this class name out of `context.packageName` (the applicationId)
+            // would ask PackageManager to enable a component that does not exist the moment
+            // the two ever diverge — which throws inside App.onCreate and kills the app
+            // before its first frame. `ComponentName(context, String)` already resolves the
+            // package itself, so only the class string is spelled out.
             val comp = ComponentName(context, "com.kefi.player.ShareTarget")
             val state = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                         else PackageManager.COMPONENT_ENABLED_STATE_DISABLED

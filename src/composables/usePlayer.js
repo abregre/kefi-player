@@ -264,6 +264,34 @@ export function usePlayer() {
     }
   }
 
+  /** Empties the queue and stops playback. The current track goes too, by design. */
+  async function clearQueue() {
+    try {
+      applySnapshot(await Player.clearQueue())
+      return true
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
+  /**
+   * Drops the already-played entries only. Resolves the number removed rather than a bare
+   * boolean, so the caller can tell "nothing to clear" apart from "cleared 12" — `false` is
+   * reserved for a real failure.
+   * @returns {Promise<number | false>}
+   */
+  async function clearPlayedQueueItems() {
+    try {
+      const snapshot = await Player.clearPlayedQueueItems()
+      applySnapshot(snapshot)
+      return snapshot.removed ?? 0
+    } catch (err) {
+      stateError.value = errorMessage(err)
+      return false
+    }
+  }
+
   async function jumpToQueueIndex(index) {
     try {
       applySnapshot(await Player.jumpToQueueIndex({ index }))
@@ -382,6 +410,8 @@ export function usePlayer() {
     moveQueueItem,
     removeQueueItem,
     jumpToQueueIndex,
+    clearQueue,
+    clearPlayedQueueItems,
     addToQueue,
     playNext,
     next,

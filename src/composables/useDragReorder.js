@@ -20,6 +20,22 @@ const LONG_PRESS_MS = 400
 const MOVE_CANCEL_PX = 10
 
 /**
+ * How close (CSS px) the carried row's finger must come to the scroller's top or bottom edge
+ * before the list starts scrolling itself. Roughly one row height, so the band is reachable
+ * without the finger having to leave the screen, and small enough that an ordinary drag in the
+ * middle of a short list never triggers it.
+ */
+const EDGE_PX = 72
+
+/**
+ * Fastest the auto-scroll may run, in CSS px per animation frame (~840px/s at 60fps). Speed
+ * ramps linearly from 0 at the edge band's inner boundary to this at the very edge, so easing
+ * the finger toward the edge creeps and pinning it there travels fast — without which a long
+ * queue either crawls or overshoots.
+ */
+const MAX_AUTO_SCROLL_PX = 14
+
+/**
  * Wires a long-press-then-drag row-reorder gesture onto `container`. Unlike
  * `useHorizontalSwipe` (passive, shares a scrolling surface, never steals the touch) and
  * `useVerticalDismiss` (non-passive, but its screen never scrolls so stealing costs
@@ -37,6 +53,13 @@ const MOVE_CANCEL_PX = 10
  * is trying to drag this row", exactly the moment `useVerticalDismiss`'s own gated
  * `preventDefault()` argues a non-passive listener stops being a scrolling hazard and starts
  * being required (the browser must not also try to scroll the page under the carried row).
+ *
+ * Because the browser's own scrolling is suppressed for the duration, the gesture has to
+ * provide its own: while a row is carried, holding the finger near the scroller's top or
+ * bottom edge scrolls the list under it (see `EDGE_PX`). Without that, a row can only ever be
+ * moved as far as one screenful — moving queue position 40 to position 2 is simply not
+ * expressible as a gesture, which is the single biggest reason reordering feels unusable on a
+ * long queue.
  *
  * @param {import('vue').Ref<HTMLElement | null>} container
  *   The list root. Rows are found by delegation, via the nearest `[data-row-index]`
@@ -73,6 +96,13 @@ export function useDragReorder(container, { rowCount, onDrop, ignore }) {
   let startX = 0
   let startY = 0
   let startIndex = null
+  /** The element that actually scrolls the list, resolved per gesture (see `scrollerFor`). */
+  let scroller = null
+  /** Its scrollTop when the row was picked up — `dragOffset` is measured against this. */
+  let startScrollTop = 0
+  /** Latest finger Y, kept because the auto-scroll loop runs between touchmove events. */
+  let lastTouchY = 0
+  let rafId = null
   /** 'idle' | 'pending' (holding, timer running) | 'armed' (held long enough, waiting for
    *  the first move) | 'dragging' (committed, following the finger). */
   let phase = 'idle'
@@ -85,6 +115,71 @@ export function useDragReorder(container, { rowCount, onDrop, ignore }) {
     return Math.min(max, Math.max(0, dragIndex.value + shift))
   })
 
+  /**
+   * The nearest ancestor that really scrolls. Resolved per gesture rather than passed in,
+   * so the caller does not have to know or thread through the app's layout (today the list
+   * sits inside `App.vue`'s `main.content`, which is the only `overflow-y: auto` box between
+   * it and the document). The `scrollHeight > clientHeight` test skips ancestors that are
+   * merely *allowed* to scroll but currently have nothing to scroll.
+   */
+  function scrollerFor(element) {
+    let node = element?.parentElement ?? null
+    while (node) {
+      const overflowY = getComputedStyle(node).overflowY
+      if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+        return node
+      }
+      node = node.parentElement
+    }
+    return document.scrollingElement ?? document.documentElement
+  }
+
+  /**
+   * Px to scroll this frame: negative up, positive down, 0 outside the edge bands. Ramped
+   * linearly across `EDGE_PX` so the speed is proportional to how far into the band the
+   * finger is, which is what makes both a one-row nudge and a forty-row trip feel controlled.
+   */
+  function autoScrollStep() {
+    if (!scroller) return 0
+    const isDocument = scroller === document.scrollingElement || scroller === document.documentElement
+    const top = isDocument ? 0 : scroller.getBoundingClientRect().top
+    const bottom = isDocument ? window.innerHeight : scroller.getBoundingClientRect().bottom
+    const fromTop = lastTouchY - top
+    const fromBottom = bottom - lastTouchY
+    if (fromTop < EDGE_PX) return -MAX_AUTO_SCROLL_PX * Math.min(1, (EDGE_PX - fromTop) / EDGE_PX)
+    if (fromBottom < EDGE_PX) return MAX_AUTO_SCROLL_PX * Math.min(1, (EDGE_PX - fromBottom) / EDGE_PX)
+    return 0
+  }
+
+  /**
+   * Runs every frame for as long as a row is carried. It re-derives `dragOffset` from the
+   * scroll it actually achieved rather than the scroll it asked for, so hitting the top or
+   * bottom of the list simply stops the travel instead of letting the carried row drift away
+   * from the finger.
+   */
+  function tickAutoScroll() {
+    if (phase !== 'dragging') {
+      rafId = null
+      return
+    }
+    const step = autoScrollStep()
+    if (step !== 0 && scroller) {
+      const before = scroller.scrollTop
+      scroller.scrollTop = before + step
+      if (scroller.scrollTop !== before) {
+        dragOffset.value = lastTouchY - startY + (scroller.scrollTop - startScrollTop)
+      }
+    }
+    rafId = requestAnimationFrame(tickAutoScroll)
+  }
+
+  function stopAutoScroll() {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
+  }
+
   function clearTimer() {
     if (timer !== null) {
       clearTimeout(timer)
@@ -94,6 +189,8 @@ export function useDragReorder(container, { rowCount, onDrop, ignore }) {
 
   function reset() {
     clearTimer()
+    stopAutoScroll()
+    scroller = null
     phase = 'idle'
     startIndex = null
     dragIndex.value = null
@@ -114,6 +211,9 @@ export function useDragReorder(container, { rowCount, onDrop, ignore }) {
     startX = touch.clientX
     startY = touch.clientY
     startIndex = Number(rowEl.dataset.rowIndex)
+    lastTouchY = touch.clientY
+    scroller = scrollerFor(container.value)
+    startScrollTop = scroller.scrollTop
     phase = 'pending'
     rowHeight.value = rowEl.getBoundingClientRect().height
     clearTimer()
@@ -148,11 +248,19 @@ export function useDragReorder(container, { rowCount, onDrop, ignore }) {
       // comment — to stop the browser from also trying to scroll the page under it.
       phase = 'dragging'
       dragIndex.value = startIndex
+      // Only now, once the drag is real, does the list start scrolling itself — an armed
+      // touch that is never moved must leave the list exactly as it found it.
+      stopAutoScroll()
+      rafId = requestAnimationFrame(tickAutoScroll)
     }
 
     // phase is 'dragging' below this line (just entered above, or already was).
     event.preventDefault()
-    dragOffset.value = dy
+    lastTouchY = touch.clientY
+    // `dy` alone is how far the FINGER moved; the list may also have scrolled under it since
+    // pickup. The carried row lives in the scrolling content, so its translate has to cover
+    // both or it slides out from under the finger the moment auto-scroll starts.
+    dragOffset.value = dy + (scroller ? scroller.scrollTop - startScrollTop : 0)
   }
 
   function onEnd() {

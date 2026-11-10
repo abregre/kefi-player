@@ -206,10 +206,21 @@ away and back too, where it used to reset to Songs.
 ## Playing queue
 
 The queue is the live Media3 playback list, separate from the Room-backed playlists above.
-Open it from Now Playing to see the ordered list and jump to any track. The current track and
-already-played entries are protected from queue edits; upcoming entries can be long-pressed and
-dragged to reorder, or removed from their options menu. “Play next” inserts directly after the
-current item, while “Add to queue” appends to the end.
+Open it from Now Playing to see the ordered list and jump to any track. It opens scrolled to the
+track that is playing, not to the top, so the upcoming entries are what fills the screen.
+
+The current track and already-played entries are protected from queue edits; upcoming entries can
+be long-pressed and dragged to reorder, swiped sideways to drop, or removed from their options
+menu. Dragging a row to the top or bottom edge scrolls the list under it, so a track can be moved
+further than one screenful. “Play next” inserts directly after the current item, while “Add to
+queue” appends to the end.
+
+The header's ⋮ menu holds the queue-wide actions: **clear played** (drops everything before the
+current track; playback is untouched), **save as playlist** (writes the queue into a new Room
+playlist), and **clear queue**, which stops playback and empties it — destructive, so it sits
+behind a confirmation step. The first two are native calls of their own (`clearPlayedQueueItems`,
+`clearQueue`) rather than loops over `removeQueueItem`, which refuses to touch the current item or
+anything before it by design.
 
 ## Roadmap
 
@@ -299,44 +310,6 @@ its own section right below.
 from `../ytmp3`, not linked to it or kept in sync with it — divergence between the two is
 accepted and expected going forward; this repo is not a fork that ever merges back into it.
 
-## The RoadSync flavor
-
-Honda RoadSync (`com.honda.ms.dm.sab`, built on the Drivemode SDK) does not pick
-music apps by enumerating `MediaBrowserService`s the way a normal Android Auto
-host does. It works from a hardcoded allowlist of package names instead: its
-dex carries a `com.drivemode.sdk.music.apps.*` class per app it knows how to
-drive. This was established on a test phone, not assumed — RoadSync's Music
-Source list showed exactly two apps, SoundCloud and VLC, the only two
-allowlisted packages installed at the time. Shazam, Stremio and ReVanced
-YouTube were also installed and all publish a `MediaBrowserService`, and none
-of them appeared. If RoadSync enumerated, they would have.
-
-Commit `ee71f09` (`PlaybackService` as a `MediaLibraryService` with a
-`MediaBrowseTree`) is still correct and still needed: it is what makes Kefi
-browsable over real Android Auto and AVRCP, both of which do enumerate. It
-just does nothing for RoadSync, which never asks.
-
-So the `roadsync` product flavor exists to get onto the allowlist by
-impersonating a package that is already on it: it builds under applicationId
-`com.shaiban.audioplayer.mplayer` — Muzio Player's real id — betting that
-Drivemode drives Muzio through its generic `MediaBrowserAdapter` rather than
-Muzio-specific commands. That is not verified; it is the bet this flavor
-makes. If it loses, `another.music.player` is the fallback id to try next.
-
-Build and install it with `npm run apk:roadsync && npm run install:apk:roadsync`.
-It is sideload-only: no store will ever accept an app under someone else's
-package id, so this flavor never ships anywhere but a device you control by
-hand. It also conflicts with the real Muzio Player — Android treats a shared
-applicationId as the same app — so a phone can have one or the other
-installed, not both. Installed on its own it keeps entirely separate app
-data from both Muzio and the `standard` Kefi flavor. RoadSync's UI may also
-show it labeled "Muzio Player" or "MP3 Player" rather than "Kefi (RoadSync)",
-if Drivemode hardcodes the display name alongside the package id instead of
-reading it from the APK.
-
-This has not been tested on the motorcycle; that verification is the user's
-to do on hardware.
-
 ## The PO-token bundle (the one TypeScript file)
 
 `src/potoken/index.ts`, built by `vite.potoken.config.ts` into
@@ -355,11 +328,9 @@ do this for you, so a plain `npm run build` is the only path that skips it.
 
 ## Android facts worth knowing before editing
 
-- The `standard` flavor's `applicationId` (**`com.kefi.player`**) must not change:
-  Android identifies an app by it, so a rename is a different app — existing
-  installs cannot update and lose their data. The `roadsync` flavor
-  deliberately builds under a different `applicationId`, so it is a separate
-  app with separate data, by design. The launcher label (`app_name` in
+- The `applicationId` (**`com.kefi.player`**) must not change: Android
+  identifies an app by it, so a rename is a different app — existing installs
+  cannot update and lose their data. The launcher label (`app_name` in
   `android/app/src/main/res/values/strings.xml`) and the icon are free to
   change.
 - `android/app/build.gradle` and `AndroidManifest.xml` are **ours to edit and are

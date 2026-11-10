@@ -210,6 +210,37 @@ export class PlayerWeb extends WebPlugin {
     return { ...this.state }
   }
 
+  async clearQueue() {
+    this.queue = []
+    this.stopTicker()
+    this.state = {
+      ...this.state,
+      mediaId: null,
+      uri: null,
+      title: null,
+      artist: null,
+      currentPosition: 0,
+      duration: 0,
+      isPlaying: false,
+      queueLength: 0,
+      currentIndex: 0,
+    }
+    this.emitState()
+    return { ...this.state }
+  }
+
+  async clearPlayedQueueItems() {
+    const removed = this.state.currentIndex
+    if (removed > 0) {
+      this.queue.splice(0, removed)
+      // Mirrors Media3 re-indexing around the playing item: the current track keeps playing
+      // and simply becomes index 0. Nothing else about the snapshot changes.
+      this.state = { ...this.state, currentIndex: 0, queueLength: this.queue.length }
+      this.emitState()
+    }
+    return { ...this.state, removed }
+  }
+
   async addToQueue({ uri }) {
     this.queue.push(uri)
     this.state.queueLength = this.queue.length

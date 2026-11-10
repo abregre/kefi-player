@@ -77,6 +77,13 @@ import { registerPlugin } from '@capacitor/core'
  * @property {(options: { from: number, to: number }) => Promise<PlayerSnapshot>} moveQueueItem
  * @property {(options: { index: number }) => Promise<PlayerSnapshot>} removeQueueItem
  * @property {(options: { index: number }) => Promise<PlayerSnapshot>} jumpToQueueIndex
+ * @property {() => Promise<PlayerSnapshot>} clearQueue
+ *   Empties the queue and stops playback. Unlike `removeQueueItem` this also discards the
+ *   current item — that is the point of it.
+ * @property {() => Promise<PlayerSnapshot & { removed: number }>} clearPlayedQueueItems
+ *   Drops every entry before the current one; playback is untouched and the playing track
+ *   becomes index 0. `removed` is how many went, so a no-op (`0`) is distinguishable from a
+ *   real edit — the snapshot alone cannot say.
  * @property {(options: { uri: string }) => Promise<PlayerSnapshot>} addToQueue
  * @property {(options: { uri: string }) => Promise<PlayerSnapshot>} playNext
  * @property {() => Promise<PlayerSnapshot>} next

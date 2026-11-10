@@ -280,6 +280,34 @@ object PlayerController {
         ctrl.removeMediaItem(index)
     }
 
+    /**
+     * Empties the queue outright. `stop()` runs before `clearMediaItems()` because clearing a
+     * playing timeline leaves the controller prepared with nothing left to play — Media3
+     * reports STATE_ENDED but the media notification stays up, so the user sees an empty queue
+     * and a live notification at once. Stopping first makes both facts land together.
+     *
+     * Unlike [removeQueueItem]/[moveQueueItem] this deliberately has no "upcoming only" guard:
+     * the whole point of the action is to discard the current item too.
+     */
+    suspend fun clearQueue(): Unit = withController { ctrl ->
+        ctrl.stop()
+        ctrl.clearMediaItems()
+    }
+
+    /**
+     * Drops every item BEFORE the current one. Playback is untouched: Media3 re-indexes the
+     * timeline around the playing item, which simply becomes index 0, so this never interrupts
+     * the sound the way [clearQueue] does.
+     *
+     * Returns how many items were removed — 0 means the current track was already first and the
+     * queue did not change, which is what lets the caller skip a pointless refresh.
+     */
+    suspend fun clearPlayedQueueItems(): Int = withController { ctrl ->
+        val played = ctrl.currentMediaItemIndex
+        if (played > 0) ctrl.removeMediaItems(0, played)
+        played
+    }
+
     suspend fun jumpToQueueIndex(index: Int): Unit = withController {
         it.seekTo(index, 0L)
         it.play()

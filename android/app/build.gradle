@@ -85,26 +85,6 @@ android {
         }
     }
 
-    // Two application ids from one code base. `standard` is the real app, built under
-    // com.kefi.player. `roadsync` exists for exactly one reason: Honda RoadSync picks
-    // media apps from a hardcoded allowlist of package names (verified 2026-09-19 --
-    // its dex carries a com.drivemode.sdk.music.apps.* class per supported app), so a
-    // correct MediaBrowserService is not enough to be listed. Building under an
-    // allowlisted package id is the only way in. See README, "The RoadSync flavor".
-    flavorDimensions "distribution"
-    productFlavors {
-        standard {
-            dimension "distribution"
-            // Restated rather than inherited from defaultConfig, so that reading either
-            // flavor tells you which app it installs as without cross-referencing.
-            applicationId "com.kefi.player"
-        }
-        roadsync {
-            dimension "distribution"
-            applicationId "com.shaiban.audioplayer.mplayer"
-        }
-    }
-
     // Optional release signing. Create android/keystore.properties with:
     //   storeFile=/absolute/path/to/kefi-player.jks
     //   storePassword=...
