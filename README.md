@@ -4,9 +4,7 @@ Android music player for the audio already on the device. Vue 3 + Vite web layer
 wrapped by Capacitor; the playback engine is native (Media3) behind a Capacitor
 plugin.
 
-The web layer is plain **JavaScript, not TypeScript** — deliberate: the sibling
-project `../ytmp3` is TypeScript, this one is not. `src/potoken/index.ts` is the
-one deliberate exception; see below.
+The web layer is plain **JavaScript, not TypeScript** — deliberate: simple, fast builds with no compilation overhead.
 
 ## What the app does
 
@@ -41,9 +39,7 @@ one deliberate exception; see below.
 - **Degrades instead of stalling.** A deleted or unreadable file is skipped, reported
   in the UI, and the queue moves on.
 
-Deliberately **not** in this version: sleep timer, playback speed, an equalizer,
-streaming, or — outside the hidden downloader tab described below — any network use
-at all.
+Deliberately **not** in this version: sleep timer, playback speed, streaming, or any network use at all.
 
 ## Requirements
 
@@ -75,16 +71,9 @@ at all.
 
 The app asks for exactly one runtime permission: **`READ_MEDIA_AUDIO`** on Android 13+,
 falling back to `READ_EXTERNAL_STORAGE` (`maxSdkVersion="32"`) below it. Nothing else
-is read, and by default nothing leaves the device: every network-capable permission the
-manifest declares, and every line of network code, lives behind the hidden downloader tab
-(see "The hidden downloader tab" below) and stays unused unless that tab is unlocked and
-opened. `POST_NOTIFICATIONS` is declared for the playback notification,
-`FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` for the playback service, and
-`FOREGROUND_SERVICE_DATA_SYNC` for the download service. `INTERNET` (already present from
-the Capacitor scaffold, before this feature existed) and `ACCESS_NETWORK_STATE` (added for
-it) are both declared, along with a legacy `WRITE_EXTERNAL_STORAGE`
-(`maxSdkVersion="28"`) needed only pre-Android-10, where the downloader writes straight
-into `/Music` instead of through MediaStore.
+is read, and nothing leaves the device: the app operates entirely offline.
+`POST_NOTIFICATIONS` is declared for the playback notification, and
+`FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_MEDIA_PLAYBACK` for the foreground playback service.
 
 The Library screen renders three distinct states rather than a blank list:
 
@@ -263,69 +252,6 @@ nobody who already installed the app can ever update it.
 
 Without a keystore, `npm run apk` (debug) still works; only release builds need one.
 
-## The hidden downloader tab
-
-A third tab, hidden by default: a YouTube-to-MP3 downloader — the one network-facing
-feature in the app, named as the exception in "What the app does" and "Permission model"
-above. A user who never unlocks the tab causes it to make zero network calls: the engine
-is only ever prepared, and only ever checked for updates, from `DownloaderView.vue`'s own
-`onMounted`, never from `main.js` or app start.
-
-Unlocked, downloads land in MediaStore under `Music/YTMP3`, so a finished file shows up in
-Songs/Albums/Artists and under Folders → YTMP3 exactly like any track already on the
-device — there is no separate "downloads" library and no folder picker: files always go to
-that one fixed location.
-
-**Unlocking it**: tap the support card at the bottom of Settings 10 times inside a
-15-second sliding window (`src/composables/useEasterEgg.js`). The card looks and behaves
-identically before and after the 10th tap — nothing about it hints that it is a target.
-The unlock:
-
-- sets a permanent preference, `kefi.downloader.unlocked` — it persists across restarts and
-  `am force-stop`, and **there is no re-lock gesture**;
-- adds the third bottom tab (Library | Downloads | Settings);
-- enables the `.ShareTarget` activity-alias at runtime, so the system Share sheet offers
-  Kefi Player as a destination for YouTube links. It ships in the manifest as
-  `android:enabled="false"` and stays invisible to the OS until this happens.
-
-**Why the engine has to run yt-dlp's nightly channel**: the yt-dlp build bundled in the APK
-is a stable release, and as of 2026-08 yt-dlp's stable channel cannot download YouTube at
-all. So the first time the downloader screen opens, it installs the `nightly` channel
-outright instead of waiting for the user to hit a broken download; every later open only
-checks for a newer nightly and offers an Update button. If that daily check fails — offline,
-or GitHub unreachable — the existing binary keeps working for whatever it already supports,
-and Update stays there to retry; nothing else in the app is affected.
-
-**The size cost**: bundling yt-dlp (CPython) and ffmpeg as native libraries grows the APK a
-lot. Measured in this project: the debug APK went from `8498205` bytes (~8.1MB) before this
-feature to `62921685` bytes (~60MB) after, for the single `arm64-v8a` ABI this app ships
-(both debug numbers; later full builds of the finished feature measured 61MB with `du -h`,
-consistent with that figure). A release APK with the downloader has not been built in this
-session — ~55-60MB is this project's own target for it, not yet a measurement.
-
-**The one TypeScript exception** this feature needs is the PO-token bundle, documented in
-its own section right below.
-
-**`ytmp3` stays a separate, separately-shipped app.** This downloader's code was copied
-from `../ytmp3`, not linked to it or kept in sync with it — divergence between the two is
-accepted and expected going forward; this repo is not a fork that ever merges back into it.
-
-## The PO-token bundle (the one TypeScript file)
-
-`src/potoken/index.ts`, built by `vite.potoken.config.ts` into
-`android/app/src/main/assets/potoken/potoken.js`, is the single exception to the
-no-TypeScript rule above. It mints YouTube PO tokens by running Google's BotGuard
-VM — an obfuscated JS blob that has to execute inside a real browser engine —
-inside an offscreen WebView with a `https://www.youtube.com` origin, something
-that cannot be done from Kotlin or Python. It is copied verbatim from `../ytmp3`
-and built as a standalone IIFE with no imports, because the native
-`PoTokenGenerator` inlines it as text into an HTML page; a cross-origin
-`<script src>` would be blocked. It is **opt-in and off by default** (forcing the
-`web` client currently lands on YouTube's SABR-only delivery, which the download
-engine can't handle yet). If you change `src/potoken/index.ts`, rebuild it with
-`npm run build:potoken` — `npm run sync` and `npm run apk`/`apk:release` already
-do this for you, so a plain `npm run build` is the only path that skips it.
-
 ## Android facts worth knowing before editing
 
 - The `applicationId` (**`com.kefi.player`**) must not change: Android
@@ -399,11 +325,10 @@ src/
   style.css          design tokens (colours, fonts, safe-area insets)
   assets/fonts/      bundled woff2 + generated fonts.css
   components/        TabBar, TrackRow, AlbumGrid, ArtistList, MiniPlayer
-  composables/       state (module-level, per the ytmp3 convention):
+  composables/       state (module-level shared refs):
                      usePlayer (native snapshot), useLibrary (MediaStore + search)
   i18n/              hand-rolled t()/setLocale over two flat dictionaries
   plugins/           JS wrappers over Capacitor plugins
-  potoken/           index.ts — the one TypeScript file, see above
   router/            hash-history routes + the Android back button
   utils/             pure helpers
   views/             LibraryView, NowPlayingView, SettingsView
