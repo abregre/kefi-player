@@ -30,6 +30,7 @@ const {
   renamePlaylist,
   deletePlaylist,
   reorderPlaylistPaths,
+  cleanMissingFromPlaylist,
   errorMessage,
 } = usePlaylists()
 const player = usePlayer()
@@ -119,6 +120,21 @@ const emptyBody = computed(() => {
   return t('playlists.empty.userPlaylist.body')
 })
 
+async function fetchPlaylistPaths() {
+  if (kind.value !== 'user') {
+    playlistPaths.value = []
+    return
+  }
+  try {
+    const { paths } = await Player.listPlaylistPaths({ id: numericId.value })
+    playlistPaths.value = paths
+  } catch {
+    // A failed fetch degrades to an empty list rather than a crash — the same posture
+    // usePlaylists.js takes on every native call.
+    playlistPaths.value = []
+  }
+}
+
 /**
  * Refetches a user playlist's paths whenever the route param changes — navigating straight
  * from one playlist to another reuses this component instance, so an `onMounted`-only fetch
@@ -126,23 +142,23 @@ const emptyBody = computed(() => {
  * mount too. Smart lists need no fetch at all: they are computeds over the library that
  * `usePlaylists.js` already keeps live.
  */
+watch(() => route.params.id, fetchPlaylistPaths, { immediate: true })
+
+/**
+ * Re-fetches paths when the current playlist's count drops — this happens when a track is
+ * deleted from device storage (`TrackMenu.onDeleteFromDevice`), which calls
+ * `usePlaylists.removeTrackPath` to patch the module-level `playlists` count without a
+ * route change. Without this watch, `playlistPaths` would still contain the deleted path
+ * and `missingCount` would stay at 1 indefinitely, showing a banner that can never
+ * be dismissed.
+ */
 watch(
-  () => route.params.id,
-  async () => {
-    if (kind.value !== 'user') {
-      playlistPaths.value = []
-      return
-    }
-    try {
-      const { paths } = await Player.listPlaylistPaths({ id: numericId.value })
-      playlistPaths.value = paths
-    } catch {
-      // A failed fetch degrades to an empty list rather than a crash — the same posture
-      // usePlaylists.js takes on every native call.
-      playlistPaths.value = []
+  () => summary.value?.count,
+  (newCount, oldCount) => {
+    if (kind.value === 'user' && newCount !== undefined && oldCount !== undefined && newCount < oldCount) {
+      fetchPlaylistPaths()
     }
   },
-  { immediate: true },
 )
 
 /**
@@ -233,6 +249,13 @@ async function onDragCommit(fromIndex, toIndex) {
  * after the navigation.
  * @param {import('../plugins/player').PlayerTrack} track
  */
+async function cleanMissing() {
+  if (kind.value !== 'user' || missingCount.value === 0) return
+  const survivingPaths = playlistPaths.value.filter((path) => trackByPath.value.has(path))
+  playlistPaths.value = survivingPaths
+  await cleanMissingFromPlaylist(numericId.value, survivingPaths)
+}
+
 function onViewInFolder(track) {
   expandFolder(track.folder)
   libraryTab.value = 'folders'
@@ -339,11 +362,14 @@ async function deleteThis() {
 
     <p v-if="displayTracks.length > 0" class="count">{{ countLabel }}</p>
 
-    <!-- Path-keying's accepted cost (decision 3): tell the user rather than silently
-         dropping entries that no longer resolve to a file. -->
-    <p v-if="missingCount > 0" class="hint missing">
-      {{ missingCount === 1 ? t('playlists.missingEntry') : t('playlists.missingEntries', { count: missingCount }) }}
-    </p>
+    <div v-if="missingCount > 0" class="missing-banner">
+      <span class="missing-text">
+        {{ missingCount === 1 ? t('playlists.missingEntry') : t('playlists.missingEntries', { count: missingCount }) }}
+      </span>
+      <button type="button" class="missing-action" @click="cleanMissing">
+        {{ t('playlists.cleanMissing') }}
+      </button>
+    </div>
 
     <div v-if="displayTracks.length === 0" class="state">
       <p class="state-title">{{ emptyTitle }}</p>
@@ -490,6 +516,44 @@ async function deleteThis() {
   color: var(--text-muted);
   font-size: 0.85rem;
   line-height: 1.45;
+}
+
+.missing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0.6rem 0 0;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.missing-text {
+  flex: 1;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.missing-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.missing-action:active {
+  background: var(--surface-2);
+  border-color: var(--accent);
 }
 
 .state {

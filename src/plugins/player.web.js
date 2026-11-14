@@ -438,6 +438,16 @@ export class PlayerWeb extends WebPlugin {
     playlist.paths = playlist.paths.filter((p) => p !== path)
   }
 
+  async removeFromAllPlaylists({ path }) {
+    for (const playlist of this.playlists) {
+      playlist.paths = playlist.paths.filter((p) => p !== path)
+    }
+    this.favoritePaths.delete(path)
+    return {
+      playlists: this.playlists.map((p) => ({ id: p.id, name: p.name, count: p.paths.length })),
+    }
+  }
+
   async reorderPlaylist({ id, paths }) {
     const playlist = this.playlists.find((p) => p.id === id)
     if (!playlist) return

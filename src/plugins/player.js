@@ -144,6 +144,11 @@ import { registerPlugin } from '@capacitor/core'
  *   renamed; that loss is an accepted consequence, not a bug, and every method below that takes
  *   or returns a `path`/`paths` uses this same identity. Idempotent per path: a path already in
  *   the playlist is not appended a second time.
+ * @property {(options: { path: string }) => Promise<{ playlists: Array<{ id: number, name: string, count: number }> }>} removeFromAllPlaylists
+ *   Removes `path` from every user playlist and from favourites in one atomic DB transaction,
+ *   then returns the full updated playlist list (same shape as `listPlaylists`). Call this
+ *   immediately after `deleteTrack` resolves `{ deleted: true }` so that JS-side state stays
+ *   consistent without a separate `listPlaylists` round trip.
  * @property {(options: { id: number, path: string }) => Promise<void>} removeFromPlaylist
  * @property {(options: { id: number, paths: string[] }) => Promise<void>} reorderPlaylist
  *   `paths` is the FULL new order, not a from/to index pair — the caller always sends every

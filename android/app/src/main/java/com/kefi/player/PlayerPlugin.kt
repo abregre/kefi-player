@@ -938,6 +938,45 @@ class PlayerPlugin : Plugin() {
     }
 
     /**
+     * Removes [path] from every playlist and from favourites in one atomic transaction, then
+     * resolves with `{ playlists: [...] }` — the same shape [listPlaylists] returns — so the JS
+     * side can patch its module-level state without a second bridge round trip.
+     *
+     * Called by the JS [usePlaylists.removeTrackPath] immediately after [deleteTrack] confirms
+     * the file was actually removed from device storage. Without this, playlist counts and the
+     * in-memory favourite set stay stale until the user manually removes each entry, and the
+     * playlist detail screen shows a permanent "1 missing" banner that cannot be dismissed.
+     */
+    @PluginMethod
+    fun removeFromAllPlaylists(call: PluginCall) {
+        val path = call.getString("path")
+        if (path.isNullOrBlank()) {
+            call.reject("A non-blank path is required")
+            return
+        }
+
+        App.scope.launch {
+            try {
+                val dao = libraryDao()
+                val updatedPlaylists = dao.removePathEverywhere(path)
+                val arr = JSArray()
+                for (p in updatedPlaylists) {
+                    val obj = JSObject()
+                    obj.put("id", p.id)
+                    obj.put("name", p.name)
+                    obj.put("count", p.count)
+                    arr.put(obj)
+                }
+                val result = JSObject()
+                result.put("playlists", arr)
+                call.resolve(result)
+            } catch (t: Throwable) {
+                call.rejectWith("Could not remove path from all playlists: ${t.message}", t)
+            }
+        }
+    }
+
+    /**
      * Takes the FULL ordered list of paths, not a from/to index pair. Mirrors
      * [com.kefi.player.library.LibraryDao.reorderPlaylist]'s own choice: a complete rewrite in
      * one transaction leaves no index arithmetic to get wrong on either side of the bridge, and

@@ -49,7 +49,7 @@ import { formatBytes, formatMs } from '../utils/format'
 const emit = defineEmits(['view-in-folder'])
 
 const { t } = useI18n()
-const { playlists, isFavorite, toggleFavorite, createPlaylist, addToPlaylist } = usePlaylists()
+const { playlists, isFavorite, toggleFavorite, createPlaylist, addToPlaylist, removeTrackPath, pathOf } = usePlaylists()
 const { activeTrack, queueIndex, closeTrackMenu } = useTrackMenu()
 const player = usePlayer()
 
@@ -175,20 +175,12 @@ async function onDeleteFromDevice() {
   busy.value = true
   notice.value = null
   try {
-    const { deleted, reason } = await Player.deleteTrack({ uri: activeTrack.value.uri })
+    const trackToDelete = activeTrack.value
+    const pathToDelete = pathOf(trackToDelete)
+    const { deleted, reason } = await Player.deleteTrack({ uri: trackToDelete.uri })
     if (deleted) {
-      // useLibrary()'s `tracks` is a module-level cache, never re-queried on its own
-      // (useLibrary.js's own doc comment) — without this the deleted track would keep
-      // showing in every list until something unrelated forced a reload.
       useLibrary().reload()
-      // Used to deliberately leave the sheet open here (same precedent as
-      // onSetAsRingtone's own success branch) so the user could read a success notice
-      // before closeTrackMenu() nulls `activeTrack` out from under it. The user has now
-      // explicitly asked for delete's success case to close the sheet instead, so this
-      // is a requested exception to that pattern, not a change to it elsewhere. No
-      // `notice.value` is set on this branch any more either: since closing happens on
-      // the same tick, a success notice would never actually be visible — setting one
-      // would be dead code, not real feedback — so the sheet closing IS the feedback now.
+      await removeTrackPath(pathToDelete)
       closeTrackMenu()
     } else if (reason === 'cancelled') {
       // The user backed out of THAT second, OS-owned dialog — nothing on disk changed,

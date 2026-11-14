@@ -206,6 +206,27 @@ interface LibraryDao {
     /** Removes a favourite by path. A no-op if it was not favourited. */
     @Query("DELETE FROM favorites WHERE path = :path")
     suspend fun deleteFavorite(path: String)
+
+    /**
+     * Removes [path] from every playlist and from favourites in one transaction, then returns
+     * the updated playlist list (same shape as [listPlaylistsWithCounts]) so the caller can
+     * patch JS-side state without a second round trip.
+     *
+     * Called from [com.kefi.player.PlayerPlugin.removeFromAllPlaylists] after a successful
+     * device-file deletion, so that playlist counts and favourite state reflect reality
+     * immediately — without this, a deleted track stays in every playlist's Room row until the
+     * user manually removes it, and the playlist detail screen shows a permanent "1 missing"
+     * notification that can never be dismissed.
+     */
+    @Transaction
+    suspend fun removePathEverywhere(path: String): List<PlaylistWithCount> {
+        deleteItemsByPath(path)
+        deleteFavorite(path)
+        return listPlaylistsWithCounts()
+    }
+
+    @Query("DELETE FROM playlist_items WHERE path = :path")
+    suspend fun deleteItemsByPath(path: String)
 }
 
 /**
