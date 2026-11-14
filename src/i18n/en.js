@@ -28,6 +28,13 @@ export default {
   'library.count.playlists': '{count} lists',
   'library.count.playlist': '1 list',
   'library.folders.root': 'Device storage',
+  'library.sort.title': 'Sort by',
+  'library.sort.byTitle': 'Title',
+  'library.sort.titleAsc': 'Title (A–Z)',
+  'library.sort.titleDesc': 'Title (Z–A)',
+  'library.sort.dateAdded': 'Recently added',
+  'library.sort.artist': 'Artist',
+  'library.sort.duration': 'Duration',
   'library.noResults.title': 'Nothing matches “{query}”',
   'library.noResults.body': 'Try a shorter search — accents and case are ignored.',
 
@@ -47,6 +54,7 @@ export default {
   'playlists.missingEntry': '1 track could not be found — it may have moved or been deleted.',
   'playlists.missingEntries':
     '{count} tracks could not be found — they may have moved or been deleted.',
+  'playlists.cleanMissing': 'Clean up',
   'playlists.empty.favorites.title': 'No favourites yet',
   'playlists.empty.favorites.body': 'Add a track to Favourites from its options menu.',
   'playlists.empty.recentlyAdded.title': 'Nothing added recently',
@@ -214,6 +222,13 @@ export default {
   'settings.playback.continue.hint': 'When a playlist ends, the next one starts. After the last, back to the first.',
   'settings.playback.notification': 'Controls in notifications',
   'settings.playback.notification.hint': 'Large play, previous and next buttons in the notification list.',
+
+  'settings.library': 'Library',
+  'settings.library.hideShort': 'Hide short audio clips',
+  'settings.library.threshold': 'Minimum duration',
+  'settings.library.thresholdVal': '{sec}s',
+  'settings.library.hideShort.hint':
+    'Ignores ringtones, voice notes, and short sound effects below the chosen duration in your library.',
 
   'settings.widget': 'Home screen',
   'settings.widget.add': 'Add the player widget',

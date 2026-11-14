@@ -99,14 +99,18 @@ const favoriteTracks = computed(() =>
  * `useLibrary.js`'s `sortedTracks` (:139-141) — since `library.tracks` is `readonly()` and
  * must never be mutated in place.
  */
-const recentlyAdded = computed(() =>
-  [...library.tracks.value]
+const recentlyAdded = computed(() => {
+  const limitMs = (library.minDurationSec.value || 30) * 1000
+  const base = library.hideShortTracks.value
+    ? library.tracks.value.filter((t) => (t.durationMs || 0) >= limitMs)
+    : library.tracks.value
+  return [...base]
     .sort(
       (a, b) =>
         effectiveDateAdded(b) - effectiveDateAdded(a) || library.collator.compare(a.title, b.title),
     )
-    .slice(0, 15),
-)
+    .slice(0, 15)
+})
 
 /**
  * Hydrates playlists and favourites from the native side. Awaited in `main.js` before the
@@ -270,6 +274,41 @@ function isFavorite(track) {
 }
 
 /**
+ * Called after a track is deleted from device storage. Removes `path` from every
+ * user playlist and from favourites in one native round trip, then patches the
+ * module-level `playlists` and `favoritePaths` refs in place so every consumer
+ * (playlist list counts, the track menu's favourite icon) is instantly consistent.
+ *
+ * Errors are swallowed into `errorMessage` exactly like the other mutating functions
+ * here — a failed cleanup is not an error the user can act on (the file is already
+ * gone), and the worst case is a stale count that corrects itself on the next
+ * `initializePlaylists()` call (e.g. the next app launch).
+ * @param {string} path
+ */
+async function cleanMissingFromPlaylist(id, paths) {
+  try {
+    await Player.reorderPlaylist({ id, paths })
+    playlists.value = playlists.value.map((playlist) =>
+      playlist.id === id ? { ...playlist, count: paths.length } : playlist,
+    )
+    errorMessage.value = ''
+  } catch (err) {
+    errorMessage.value = messageOf(err)
+  }
+}
+
+async function removeTrackPath(path) {
+  try {
+    const { playlists: updated } = await Player.removeFromAllPlaylists({ path })
+    playlists.value = updated
+    favoritePaths.value.delete(path)
+    errorMessage.value = ''
+  } catch (err) {
+    errorMessage.value = messageOf(err)
+  }
+}
+
+/**
  * Sets (not toggles server-side, per `setFavorite`'s own contract) the opposite of the
  * track's current favourite state. Mutates `favoritePaths.value` in place on success —
  * see the reactivity note on the ref's declaration above for why that is enough to update
@@ -305,8 +344,10 @@ export function usePlaylists() {
     removeFromPlaylist,
     reorderPlaylist,
     reorderPlaylistPaths,
+    cleanMissingFromPlaylist,
     toggleFavorite,
     isFavorite,
+    removeTrackPath,
     pathOf,
   }
 }

@@ -18,6 +18,7 @@ import { ref } from 'vue'
  * @type {import('vue').Ref<'songs' | 'albums' | 'artists' | 'folders' | 'playlists'>}
  */
 export const tab = ref('songs')
+export const sortSheetOpen = ref(false)
 </script>
 
 <script setup>
@@ -51,6 +52,9 @@ const {
   reload,
   requestPermission,
   openAppSettings,
+  sortBy,
+  sortOrder,
+  setSorting,
 } = useLibrary()
 const player = usePlayer()
 // Only `playlists` (the list-of-lists count for the header) is needed here — the tab body
@@ -68,6 +72,29 @@ const TABS = ['songs', 'albums', 'artists', 'folders', 'playlists']
 
 const page = ref(null)
 const segmented = ref(null)
+
+const SORT_CATEGORIES = [
+  { by: 'title', defaultOrder: 'asc', labelKey: 'library.sort.byTitle' },
+  { by: 'dateAdded', defaultOrder: 'desc', labelKey: 'library.sort.dateAdded' },
+  { by: 'artist', defaultOrder: 'asc', labelKey: 'library.sort.artist' },
+  { by: 'duration', defaultOrder: 'desc', labelKey: 'library.sort.duration' },
+]
+
+const currentSortLabel = computed(() => {
+  const match = SORT_CATEGORIES.find((cat) => cat.by === sortBy.value)
+  const name = match ? t(match.labelKey) : t('library.sort.byTitle')
+  const arrow = sortOrder.value === 'desc' ? '↓' : '↑'
+  return `${name} ${arrow}`
+})
+
+function selectSort(cat) {
+  if (sortBy.value === cat.by) {
+    const nextOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
+    setSorting(cat.by, nextOrder)
+  } else {
+    setSorting(cat.by, cat.defaultOrder || 'asc')
+  }
+}
 
 /**
  * Swiping the page moves one tab, the way the segmented control reads left to right. No
@@ -341,17 +368,34 @@ async function onViewInFolder(track) {
       <p v-if="status === 'loading'" class="hint loading">{{ t('library.loading') }}</p>
 
       <template v-else>
-        <ul v-if="tab === 'songs'" ref="songList" class="list">
-          <li v-for="track in visibleTracks" :key="track.id">
-            <TrackRow
-              :track="track"
-              :active="player.mediaId.value === track.uri"
-              :playing="player.isPlaying.value && player.mediaId.value === track.uri"
-              @select="playFrom"
-              @options="openTrackMenu"
-            />
-          </li>
-        </ul>
+        <template v-if="tab === 'songs'">
+          <div class="songs-bar">
+            <span class="songs-count">{{ visibleTracks.length === 1 ? t('library.count.song') : t('library.count.songs', { count: visibleTracks.length }) }}</span>
+            <button
+              type="button"
+              class="sort-trigger"
+              :aria-label="t('library.sort.title')"
+              @click="sortSheetOpen = true"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="sort-icon" aria-hidden="true">
+                <path d="M3 6h18M6 12h12M9 18h6" />
+              </svg>
+              <span>{{ currentSortLabel }}</span>
+            </button>
+          </div>
+
+          <ul ref="songList" class="list">
+            <li v-for="track in visibleTracks" :key="track.id">
+              <TrackRow
+                :track="track"
+                :active="player.mediaId.value === track.uri"
+                :playing="player.isPlaying.value && player.mediaId.value === track.uri"
+                @select="playFrom"
+                @options="openTrackMenu"
+              />
+            </li>
+          </ul>
+        </template>
         <AlbumGrid v-else-if="tab === 'albums'" :albums="albums" @select="playGroup" />
         <ArtistList v-else-if="tab === 'artists'" :artists="artists" @select="playGroup" />
         <FolderList
@@ -380,6 +424,45 @@ async function onViewInFolder(track) {
   <!-- Fixed-position and renders nothing until a menu is open (T8), so its place in the
        template has no effect on this screen's layout. -->
   <TrackMenu @view-in-folder="onViewInFolder" />
+
+  <Transition name="sort-sheet">
+    <div v-if="sortSheetOpen" class="sort-backdrop" @click.self="sortSheetOpen = false">
+      <div class="sort-sheet" role="dialog" aria-modal="true">
+        <div class="sort-sheet-head">
+          <span class="sort-sheet-title">{{ t('library.sort.title') }}</span>
+          <button type="button" class="sort-close-btn" @click="sortSheetOpen = false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+        <div class="sort-options">
+          <button
+            v-for="cat in SORT_CATEGORIES"
+            :key="cat.by"
+            type="button"
+            class="sort-option"
+            :class="{ active: sortBy === cat.by }"
+            @click="selectSort(cat)"
+          >
+            <span>{{ t(cat.labelKey) }}</span>
+            <span v-if="sortBy === cat.by" class="sort-arrow-wrap" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.3"
+                class="sort-arrow"
+                :class="{ desc: sortOrder === 'desc' }"
+              >
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -603,5 +686,157 @@ async function onViewInFolder(track) {
   font-size: 1rem;
   /* Echoes the user's own query back, which can be anything at all. */
   overflow-wrap: anywhere;
+}
+
+.songs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.35rem 0 0.2rem;
+  padding: 0 0.2rem;
+}
+
+.songs-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.sort-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+}
+
+.sort-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  z-index: 40;
+}
+
+.sort-sheet {
+  width: 100%;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  border-radius: 0.9rem 0.9rem 0 0;
+  padding: 0.8rem 1rem calc(var(--safe-bottom) + 0.9rem);
+}
+
+.sort-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.sort-sheet-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sort-close-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  width: 1.8rem;
+  height: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.sort-close-btn svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.sort-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sort-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.7rem 0.6rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: start;
+}
+
+.sort-option.active {
+  background: var(--surface-2);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sort-arrow-wrap {
+  width: 1.3rem;
+  height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sort-arrow {
+  width: 1.15rem;
+  height: 1.15rem;
+  transition: transform 0.2s ease;
+}
+
+.sort-arrow.desc {
+  transform: rotate(180deg);
+}
+
+.sort-sheet-enter-active,
+.sort-sheet-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.sort-sheet-enter-from,
+.sort-sheet-leave-to {
+  opacity: 0;
+}
+
+.sort-sheet-enter-active .sort-sheet,
+.sort-sheet-leave-active .sort-sheet {
+  transition: transform 0.22s ease;
+}
+
+.sort-sheet-enter-from .sort-sheet,
+.sort-sheet-leave-to .sort-sheet {
+  transform: translateY(100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sort-backdrop,
+  .sort-sheet {
+    transition: none;
+  }
 }
 </style>

@@ -6,6 +6,7 @@ import { useLibrary } from '../composables/useLibrary'
 import { usePlayer } from '../composables/usePlayer'
 import { useTrackMenu } from '../composables/useTrackMenu'
 import { useVerticalDismiss } from '../composables/useVerticalDismiss'
+import { useHorizontalSwipe } from '../composables/useHorizontalSwipe'
 import TrackMenu from '../components/TrackMenu.vue'
 import { formatMs } from '../utils/format'
 // `expandFolder`/`tab` are T13's module-scope shared state (FolderList.vue/LibraryView.vue),
@@ -110,6 +111,17 @@ function onViewInFolder(track) {
 }
 
 const page = ref(null)
+const artArea = ref(null)
+
+useHorizontalSwipe(artArea, {
+  onSwipe: (direction) => {
+    if (direction === 'left') {
+      player.next()
+    } else if (direction === 'right') {
+      player.previous()
+    }
+  },
+})
 
 /*
  * The back button at line 84 stays the primary way to leave this screen; this is an
@@ -182,7 +194,7 @@ const { offset, dragging: sheetDragging } = useVerticalDismiss(page, {
     </header>
 
     <template v-if="player.mediaId.value">
-      <div class="art">
+      <div ref="artArea" class="art">
         <img v-if="cover" class="art-image" :src="cover" :alt="album" />
         <span v-else class="art-placeholder" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1">

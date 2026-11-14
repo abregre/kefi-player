@@ -1,16 +1,33 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { LOCALES, useI18n } from '../i18n'
 import { Player } from '../plugins/player'
 import { registerTap } from '../composables/useEasterEgg'
 import { useRouter } from 'vue-router'
 import { useSoundSettings } from '../composables/useSoundSettings'
 import { usePlaybackSettings } from '../composables/usePlaybackSettings'
+import { useLibrary } from '../composables/useLibrary'
 
 const { locale, t, setLocale } = useI18n()
 const router = useRouter()
 const { sound, load: loadSound } = useSoundSettings()
 loadSound()
+const { hideShortTracks, setHideShortTracks, minDurationSec, setMinDurationSec } = useLibrary()
+
+const sliderSec = ref(minDurationSec.value || 60)
+watch(minDurationSec, (val) => {
+  if (val) sliderSec.value = val
+})
+
+function onThresholdInput(event) {
+  sliderSec.value = Number(event.target.value)
+}
+
+function onThresholdChange(event) {
+  const val = Number(event.target.value)
+  sliderSec.value = val
+  setMinDurationSec(val)
+}
 
 /*
  * Read here and written here, never consulted at playback time. The native side decides on its
@@ -111,6 +128,41 @@ async function addWidget() {
       </label>
     </div>
     <p class="note">{{ t('settings.playback.notification.hint') }}</p>
+
+    <h2 class="section-title">{{ t('settings.library') }}</h2>
+    <div class="card">
+      <label class="option toggle">
+        <span>{{ t('settings.library.hideShort') }}</span>
+        <input
+          type="checkbox"
+          :checked="hideShortTracks"
+          @change="setHideShortTracks($event.target.checked)"
+        >
+      </label>
+
+      <div v-if="hideShortTracks" class="threshold-section">
+        <div class="threshold-header">
+          <span class="threshold-title">{{ t('settings.library.threshold') }}</span>
+          <span class="threshold-value">{{ t('settings.library.thresholdVal', { sec: sliderSec }) }}</span>
+        </div>
+        <input
+          type="range"
+          class="threshold-slider"
+          min="20"
+          max="80"
+          step="1"
+          :value="sliderSec"
+          :aria-label="t('settings.library.threshold')"
+          @input="onThresholdInput"
+          @change="onThresholdChange"
+        />
+        <div class="threshold-limits">
+          <span>20s</span>
+          <span>80s</span>
+        </div>
+      </div>
+    </div>
+    <p class="note">{{ t('settings.library.hideShort.hint') }}</p>
 
     <h2 class="section-title">{{ t('settings.widget') }}</h2>
     <div class="card">
@@ -275,5 +327,44 @@ async function addWidget() {
   color: var(--text-muted);
   font-size: 0.85rem;
   line-height: 1.45;
+}
+
+.threshold-section {
+  padding: 0.75rem 1rem 0.9rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.threshold-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.threshold-title {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.threshold-value {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.threshold-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0.25rem 0;
+}
+
+.threshold-limits {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 </style>

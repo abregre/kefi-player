@@ -11,6 +11,7 @@ import VolumeBoosterView from '../views/VolumeBoosterView.vue'
 import { unlocked } from '../composables/useEasterEgg'
 import { usePlaylists } from '../composables/usePlaylists'
 import { useTrackMenu } from '../composables/useTrackMenu'
+import { sortSheetOpen } from '../views/LibraryView.vue'
 
 // `usePlaylists()` is a plain function (no lifecycle hooks), so calling it here — outside
 // any component — is safe and gives the guard below a live view of the same module-level
@@ -68,6 +69,10 @@ export function wireHardwareBack() {
   CapacitorApp.addListener('backButton', () => {
     if (trackMenuOpen.value) {
       closeTrackMenu()
+      return
+    }
+    if (sortSheetOpen.value) {
+      sortSheetOpen.value = false
       return
     }
     if (router.currentRoute.value.path === '/library') {

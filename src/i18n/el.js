@@ -27,6 +27,13 @@ export default {
   'library.count.playlists': '{count} λίστες',
   'library.count.playlist': '1 λίστα',
   'library.folders.root': 'Αποθηκευτικός χώρος',
+  'library.sort.title': 'Ταξινόμηση κατά',
+  'library.sort.byTitle': 'Τίτλος',
+  'library.sort.titleAsc': 'Τίτλος (Α–Ω)',
+  'library.sort.titleDesc': 'Τίτλος (Ω–Α)',
+  'library.sort.dateAdded': 'Πρόσφατα προστέθηκαν',
+  'library.sort.artist': 'Καλλιτέχνης',
+  'library.sort.duration': 'Διάρκεια',
   'library.noResults.title': 'Κανένα αποτέλεσμα για «{query}»',
   'library.noResults.body': 'Δοκίμασε πιο σύντομη αναζήτηση — τόνοι και κεφαλαία δεν μετρούν.',
 
@@ -46,6 +53,7 @@ export default {
   'playlists.missingEntry': 'Ένα κομμάτι δεν βρέθηκε — μπορεί να μετακινήθηκε ή διαγράφηκε.',
   'playlists.missingEntries':
     '{count} κομμάτια δεν βρέθηκαν — μπορεί να μετακινήθηκαν ή διαγράφηκαν.',
+  'playlists.cleanMissing': 'Εκκαθάριση',
   'playlists.empty.favorites.title': 'Δεν έχεις αγαπημένα ακόμα',
   'playlists.empty.favorites.body':
     'Πρόσθεσε ένα κομμάτι στα Αγαπημένα από το μενού επιλογών του.',
@@ -216,6 +224,13 @@ export default {
   'settings.playback.continue.hint': 'Όταν τελειώνει μια playlist, ξεκινά η επόμενη. Μετά την τελευταία, πάλι η πρώτη.',
   'settings.playback.notification': 'Χειριστήρια στις ειδοποιήσεις',
   'settings.playback.notification.hint': 'Μεγάλα κουμπιά play, προηγούμενο και επόμενο στη λίστα ειδοποιήσεων.',
+
+  'settings.library': 'Βιβλιοθήκη',
+  'settings.library.hideShort': 'Απόκρυψη σύντομων αρχείων ήχου',
+  'settings.library.threshold': 'Ελάχιστη διάρκεια',
+  'settings.library.thresholdVal': '{sec}δ',
+  'settings.library.hideShort.hint':
+    'Αγνοεί ringtones, ηχητικά μηνύματα και εφέ κάτω από την επιλεγμένη διάρκεια στη βιβλιοθήκη.',
 
   'settings.widget': 'Αρχική οθόνη',
   'settings.widget.add': 'Προσθήκη widget',

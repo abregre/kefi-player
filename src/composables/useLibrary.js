@@ -1,4 +1,5 @@
 import { computed, readonly, ref } from 'vue'
+import { Preferences } from '@capacitor/preferences'
 import { Player } from '../plugins/player'
 
 /**
@@ -36,6 +37,62 @@ const query = ref('')
 const artwork = ref({})
 /** Track ids with an in-flight `getArtwork` call, so a re-render cannot double-fetch. */
 const artworkPending = new Set()
+
+const PREF_HIDE_SHORT = 'kefi.library.hideShortTracks'
+const PREF_MIN_DURATION = 'kefi.library.minDurationSec'
+const PREF_SORT_BY = 'kefi.library.sortBy'
+const PREF_SORT_ORDER = 'kefi.library.sortOrder'
+
+const hideShortTracks = ref(true)
+const minDurationSec = ref(60)
+const sortBy = ref('title')
+const sortOrder = ref('asc')
+
+async function loadPreferences() {
+  try {
+    const [hideRes, minDurRes, sortRes, orderRes] = await Promise.all([
+      Preferences.get({ key: PREF_HIDE_SHORT }),
+      Preferences.get({ key: PREF_MIN_DURATION }),
+      Preferences.get({ key: PREF_SORT_BY }),
+      Preferences.get({ key: PREF_SORT_ORDER }),
+    ])
+    if (hideRes.value !== null) {
+      hideShortTracks.value = hideRes.value === '1'
+    } else {
+      hideShortTracks.value = true
+    }
+    if (minDurRes.value !== null) {
+      const parsed = parseInt(minDurRes.value, 10)
+      if (!isNaN(parsed) && parsed > 0) minDurationSec.value = parsed
+    }
+    if (sortRes.value) sortBy.value = sortRes.value
+    if (orderRes.value) sortOrder.value = orderRes.value
+  } catch {}
+}
+void loadPreferences()
+
+async function setHideShortTracks(enabled) {
+  hideShortTracks.value = Boolean(enabled)
+  try {
+    await Preferences.set({ key: PREF_HIDE_SHORT, value: enabled ? '1' : '0' })
+  } catch {}
+}
+
+async function setMinDurationSec(sec) {
+  minDurationSec.value = Number(sec)
+  try {
+    await Preferences.set({ key: PREF_MIN_DURATION, value: String(sec) })
+  } catch {}
+}
+
+async function setSorting(by, order) {
+  sortBy.value = by
+  if (order) sortOrder.value = order
+  try {
+    await Preferences.set({ key: PREF_SORT_BY, value: by })
+    if (order) await Preferences.set({ key: PREF_SORT_ORDER, value: order })
+  } catch {}
+}
 
 let loadPromise = null
 
@@ -136,9 +193,38 @@ async function load({ force = false } = {}) {
   return loadPromise
 }
 
-const sortedTracks = computed(() =>
-  [...tracks.value].sort((a, b) => collator.compare(a.title, b.title)),
-)
+const filteredBaseTracks = computed(() => {
+  if (!hideShortTracks.value) return tracks.value
+  const limitMs = (minDurationSec.value || 30) * 1000
+  return tracks.value.filter((track) => (track.durationMs || 0) >= limitMs)
+})
+
+const sortedTracks = computed(() => {
+  const list = [...filteredBaseTracks.value]
+  const by = sortBy.value
+  const order = sortOrder.value
+  const multiplier = order === 'desc' ? -1 : 1
+
+  return list.sort((a, b) => {
+    if (by === 'dateAdded') {
+      const dateA = a.dateAdded === 0 ? -Infinity : (a.dateAdded || 0)
+      const dateB = b.dateAdded === 0 ? -Infinity : (b.dateAdded || 0)
+      const diff = order === 'desc' ? dateB - dateA : dateA - dateB
+      return diff || collator.compare(a.title, b.title)
+    }
+    if (by === 'duration') {
+      const durA = a.durationMs || 0
+      const durB = b.durationMs || 0
+      const diff = order === 'desc' ? durB - durA : durA - durB
+      return diff || collator.compare(a.title, b.title)
+    }
+    if (by === 'artist') {
+      const diff = collator.compare(a.artist || '', b.artist || '')
+      return (diff * multiplier) || collator.compare(a.title, b.title)
+    }
+    return collator.compare(a.title, b.title) * multiplier
+  })
+})
 
 const visibleTracks = computed(() => {
   const needle = query.value.trim().normalize('NFC')
@@ -268,6 +354,13 @@ export function useLibrary() {
     sortedTracks,
     visibleTracks,
     collator,
+    hideShortTracks: readonly(hideShortTracks),
+    setHideShortTracks,
+    minDurationSec: readonly(minDurationSec),
+    setMinDurationSec,
+    sortBy: readonly(sortBy),
+    sortOrder: readonly(sortOrder),
+    setSorting,
     load,
     /** Re-queries MediaStore even if a previous load succeeded (pull-to-refresh, T19). */
     reload: () => load({ force: true }),
